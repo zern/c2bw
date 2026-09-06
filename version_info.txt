@@ -3,8 +3,8 @@
 
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(3, 0, 0, 0),    # 文件版本，必须是4个数字，用逗号隔开
-    prodvers=(3, 0, 0, 0),    # 产品版本，同上
+    filevers=(3, 0, 0, 0),
+    prodvers=(3, 0, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -16,16 +16,16 @@ VSVersionInfo(
     StringFileInfo(
       [
       StringTable(
-        u'080404b0', # 0804代表简体中文，04b0代表Unicode
+        u'080404b0',
         [StringStruct(u'CompanyName', u'汉籍合璧'),
-        StringStruct(u'FileDescription', u'智能图像预处理工具 (批量裁切与二值化)'),
+        StringStruct(u'FileDescription', u'智能图像预处理工具 v3.0'),
         StringStruct(u'FileVersion', u'3.0.0.0'),
         StringStruct(u'InternalName', u'c2bw_processor'),
         StringStruct(u'LegalCopyright', u'Copyright (c) 2026 weiceng'),
-        StringStruct(u'OriginalFilename', u'智能图像预处理工具.exe'),
+        StringStruct(u'OriginalFilename', u'智能图像预处理工具 v3.0.exe'),
         StringStruct(u'ProductName', u'智能图像预处理工具 v3.0'),
         StringStruct(u'ProductVersion', u'3.0.0.0')])
       ]),
-    VarFileInfo([VarStruct(u'Translation', [2052, 1200])]) # 2052=简体中文
+    VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
   ]
 )
