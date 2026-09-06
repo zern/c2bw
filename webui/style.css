@@ -1,0 +1,380 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  min-width: 0;
+  min-height: 100%;
+  margin: 0;
+  background: #edf2f7;
+  color: #243247;
+  font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+}
+
+body {
+  overflow-y: auto;
+}
+
+[v-cloak] {
+  display: none;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  min-height: 88px;
+  padding: 18px 32px;
+  color: #ffffff;
+  background: #163c68;
+  background: linear-gradient(115deg, #153a64 0%, #245d91 65%, #2c70a2 100%);
+  box-shadow: 0 3px 14px rgba(17, 47, 80, 0.22);
+}
+
+.brand-mark {
+  display: flex;
+  flex: 0 0 48px;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-right: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 25px;
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+.brand-copy h1 {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+
+.brand-copy p {
+  margin: 0;
+  color: #d3e6f7;
+  font-size: 13px;
+}
+
+.version-tag {
+  margin-left: auto;
+  border-color: rgba(255, 255, 255, 0.42) !important;
+  color: #ffffff !important;
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+.update-badge { margin-left: 16px; cursor: pointer; }
+.update-icon { color: #ffd166; font-size: 22px; }
+.update-popover .update-title { color: #163c68; font-size: 16px; font-weight: 600; }
+.update-date { margin-top: 5px; color: #8492a6; font-size: 12px; }
+.update-list { margin: 10px 0 14px; padding-left: 18px; color: #475569; line-height: 1.7; }
+
+.workspace {
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 22px 26px 34px;
+}
+
+.workspace > .el-alert {
+  margin-bottom: 14px;
+}
+
+.section-card {
+  margin-bottom: 16px;
+  border: 1px solid #dce5ee;
+  border-radius: 10px;
+  background: #ffffff;
+}
+
+.section-card .el-card__header {
+  padding: 14px 18px;
+  border-bottom-color: #e7edf3;
+}
+
+.section-card .el-card__body {
+  padding: 18px;
+}
+
+.card-heading {
+  display: flex;
+  align-items: center;
+  color: #26384d;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.card-heading-switch {
+  justify-content: space-between;
+}
+
+.heading-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 29px;
+  height: 29px;
+  margin-right: 9px;
+  border-radius: 8px;
+  color: #276fbd;
+  background: #e8f3ff;
+  vertical-align: middle;
+}
+
+.heading-icon.cyan {
+  color: #0f8794;
+  background: #e4f7f8;
+}
+
+.heading-icon.amber {
+  color: #b37313;
+  background: #fff2dc;
+}
+
+.heading-icon.violet {
+  color: #7659b8;
+  background: #f0ebfd;
+}
+
+.directory-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 13px;
+}
+
+.directory-row > label {
+  flex: 0 0 76px;
+  color: #526275;
+  font-size: 14px;
+}
+
+.directory-row .el-input {
+  min-width: 0;
+  margin-right: 10px;
+}
+
+.directory-row .el-button {
+  flex: 0 0 auto;
+}
+
+.directory-option {
+  display: flex;
+  align-items: center;
+  margin-left: 76px;
+  color: #8995a4;
+  font-size: 12px;
+}
+
+.directory-option .el-checkbox {
+  margin-right: 12px;
+}
+
+.option-grid {
+  display: flex;
+  align-items: stretch;
+  margin: 0 -8px;
+}
+
+.option-grid > .section-card {
+  flex: 1 1 0;
+  min-width: 0;
+  margin-right: 8px;
+  margin-left: 8px;
+}
+
+.option-body {
+  min-height: 138px;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+  margin-bottom: 9px;
+}
+
+.setting-row-top {
+  align-items: flex-start;
+}
+
+.setting-label {
+  flex: 0 0 100px;
+  padding-top: 7px;
+  color: #526275;
+  font-size: 13px;
+}
+
+.compact-row .el-input-number,
+.setting-row > .el-input-number {
+  width: 132px;
+}
+
+.unit {
+  margin-left: 8px;
+  color: #718095;
+}
+
+.reading-order .el-radio {
+  margin-right: 18px;
+}
+
+.setting-tip {
+  margin: 14px 0 0 100px;
+  color: #8a97a7;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.disabled-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 138px;
+  border: 1px dashed #dce4ec;
+  border-radius: 8px;
+  color: #9aa6b4;
+  background: #f8fafc;
+}
+
+.disabled-panel i {
+  margin-right: 8px;
+  font-size: 22px;
+}
+
+.execution-options {
+  display: flex;
+  align-items: center;
+  margin-bottom: 18px;
+}
+
+.inline-setting {
+  display: flex;
+  align-items: center;
+  margin-right: 34px;
+  color: #526275;
+  font-size: 13px;
+}
+
+.inline-setting .el-input-number {
+  width: 126px;
+  margin-left: 12px;
+}
+
+.progress-panel {
+  padding: 15px 17px;
+  border: 1px solid #e2e9f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.progress-meta {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  color: #5b6b7f;
+  font-size: 13px;
+}
+
+.progress-meta strong {
+  color: #2f80ed;
+  font-weight: 600;
+}
+
+.status-line {
+  display: flex;
+  align-items: flex-start;
+  min-height: 20px;
+  margin-top: 11px;
+  color: #738196;
+  font-size: 12px;
+  line-height: 1.55;
+  word-break: break-all;
+}
+
+.status-line.active {
+  color: #3e6289;
+}
+
+.status-line i {
+  flex: 0 0 auto;
+  margin: 3px 7px 0 0;
+}
+
+.action-row {
+  display: flex;
+  justify-content: flex-end;
+  width: 100%;
+  padding-top: 16px;
+}
+
+.action-row .el-button {
+  flex: 0 0 auto;
+  min-width: 96px;
+}
+
+@media (max-width: 880px) {
+  .app-header {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .workspace {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .option-grid {
+    display: block;
+    margin: 0;
+  }
+
+  .option-grid > .section-card {
+    margin-right: 0;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 660px) {
+  .brand-copy p {
+    display: none;
+  }
+
+  .directory-row {
+    flex-wrap: wrap;
+  }
+
+  .directory-row > label {
+    flex-basis: 100%;
+    margin-bottom: 7px;
+  }
+
+  .directory-row .el-input {
+    flex: 1 1 320px;
+  }
+
+  .directory-option {
+    display: block;
+    margin-left: 0;
+  }
+
+  .directory-option > span {
+    display: block;
+    margin-top: 6px;
+  }
+
+  .execution-options {
+    display: block;
+  }
+
+  .inline-setting {
+    margin: 0 0 12px;
+  }
+}

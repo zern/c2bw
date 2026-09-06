@@ -1,0 +1,7 @@
+.venv*/
+.pyinstaller-cache*/
+build/
+dist/
+dist_*/
+__pycache__/
+*.pyc

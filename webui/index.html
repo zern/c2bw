@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>智能图像预处理工具</title>
+  <link rel="stylesheet" href="vendor/element-ui.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app" v-cloak>
+    <header class="app-header">
+      <div class="brand-mark"><i class="el-icon-reading"></i></div>
+      <div class="brand-copy">
+        <h1>智能图像预处理工具</h1>
+        <p>批量裁切、黑白二值化与 PDF 汇总</p>
+      </div>
+      <el-tag class="version-tag" size="small" effect="plain">v3.0</el-tag>
+      <el-popover v-if="updateAvailable" placement="bottom-end" width="300" trigger="hover">
+        <div class="update-popover">
+          <div class="update-title">发现新版本 {{ updateInfo.version }}</div>
+          <div v-if="updateInfo.release_date" class="update-date">发布日期：{{ updateInfo.release_date }}</div>
+          <ul class="update-list"><li v-for="(item, index) in updateInfo.changes" :key="index">{{ item }}</li></ul>
+          <el-button type="primary" size="small" icon="el-icon-download" :disabled="!updateInfo.download_url" @click="downloadUpdate">下载最新版</el-button>
+        </div>
+        <el-badge slot="reference" is-dot class="update-badge"><i class="el-icon-bell update-icon"></i></el-badge>
+      </el-popover>
+    </header>
+
+    <main class="workspace">
+      <el-alert
+        v-if="!bridgeReady"
+        title="正在连接本地处理服务…"
+        type="info"
+        :closable="false"
+        show-icon>
+      </el-alert>
+
+      <el-card class="section-card source-card" shadow="never">
+        <div slot="header" class="card-heading">
+          <span class="heading-icon"><i class="el-icon-folder-opened"></i></span>
+          <span>文件目录</span>
+        </div>
+
+        <div class="directory-row">
+          <label>输入目录</label>
+          <el-input
+            v-model="form.source_dir"
+            :disabled="processing"
+            placeholder="请选择需要处理的图片文件夹">
+          </el-input>
+          <el-button
+            :loading="directoryLoading === 'source_dir'"
+            :disabled="processing"
+            icon="el-icon-folder-opened"
+            @click="selectDirectory('source_dir')">浏览</el-button>
+        </div>
+
+        <div class="directory-row">
+          <label>输出目录</label>
+          <el-input
+            v-model="form.target_dir"
+            :disabled="processing"
+            placeholder="默认在输入目录下创建 output 文件夹">
+          </el-input>
+          <el-button
+            :loading="directoryLoading === 'target_dir'"
+            :disabled="processing"
+            icon="el-icon-folder-opened"
+            @click="selectDirectory('target_dir')">浏览</el-button>
+        </div>
+
+        <div class="directory-option">
+          <el-checkbox v-model="form.include_subfolders" :disabled="processing">
+            处理子文件夹内的文件
+          </el-checkbox>
+          <span>输出时保留目录结构，并自动排除本次输出目录</span>
+        </div>
+      </el-card>
+
+      <div class="option-grid">
+        <el-card class="section-card" shadow="never">
+          <div slot="header" class="card-heading card-heading-switch">
+            <span><span class="heading-icon cyan"><i class="el-icon-magic-stick"></i></span>色彩处理</span>
+            <el-switch v-model="form.enable_binarize" :disabled="processing"></el-switch>
+          </div>
+
+          <div v-if="form.enable_binarize" class="option-body">
+            <div class="setting-row setting-row-top">
+              <span class="setting-label">二值化方式</span>
+              <el-radio-group v-model="form.bin_method" :disabled="processing">
+                <el-radio-button label="0">OTSU 自适应</el-radio-button>
+                <el-radio-button label="1">自定义阈值</el-radio-button>
+              </el-radio-group>
+            </div>
+            <div v-if="form.bin_method === '1'" class="setting-row compact-row">
+              <span class="setting-label">阈值</span>
+              <el-input-number
+                v-model="form.threshold_val"
+                :min="0"
+                :max="100"
+                :disabled="processing"
+                size="small">
+              </el-input-number>
+              <span class="unit">%</span>
+            </div>
+            <p class="setting-tip">输出为 1 位 Group 4 TIFF，适合文字类扫描图。</p>
+          </div>
+
+          <div v-else class="option-body">
+            <div class="setting-row setting-row-top">
+              <span class="setting-label">输出格式</span>
+              <el-radio-group v-model="form.non_bin_format" :disabled="processing">
+                <el-radio label="keep">保持原格式与品质</el-radio>
+                <el-radio label="jpg80">转为 JPG（质量 80）</el-radio>
+              </el-radio-group>
+            </div>
+            <p class="setting-tip">仅裁切 JPEG 时保留来源量化表和色度抽样。</p>
+          </div>
+        </el-card>
+
+        <el-card class="section-card" shadow="never">
+          <div slot="header" class="card-heading card-heading-switch">
+            <span><span class="heading-icon amber"><i class="el-icon-scissors"></i></span>分页处理</span>
+            <el-switch v-model="form.enable_crop" :disabled="processing"></el-switch>
+          </div>
+
+          <div v-if="form.enable_crop" class="option-body">
+            <div class="setting-row">
+              <span class="setting-label">排除单页比例</span>
+              <el-input-number
+                v-model="form.exclude_ratio"
+                :min="0.1"
+                :max="10"
+                :step="0.1"
+                :precision="1"
+                :disabled="processing"
+                size="small">
+              </el-input-number>
+            </div>
+            <div class="setting-row">
+              <span class="setting-label">分割比例</span>
+              <el-input-number
+                v-model="form.crop_percent"
+                :min="1"
+                :max="100"
+                :disabled="processing"
+                size="small">
+              </el-input-number>
+              <span class="unit">%</span>
+            </div>
+            <div class="setting-row reading-order">
+              <span class="setting-label">阅读顺序</span>
+              <el-radio-group v-model="form.crop_direction" :disabled="processing">
+                <el-radio label="R2L">从右到左</el-radio>
+                <el-radio label="L2R">从左到右</el-radio>
+              </el-radio-group>
+            </div>
+            <p class="setting-tip">宽高比低于排除值的图片按单页输出。</p>
+          </div>
+
+          <div v-else class="disabled-panel">
+            <i class="el-icon-document"></i>
+            <span>每张图片按单页输出</span>
+          </div>
+        </el-card>
+      </div>
+
+      <el-card class="section-card execution-card" shadow="never">
+        <div slot="header" class="card-heading">
+          <span class="heading-icon violet"><i class="el-icon-setting"></i></span>
+          <span>执行设置</span>
+        </div>
+
+        <div class="execution-options">
+          <div class="inline-setting">
+            <span>最大线程数</span>
+            <el-input-number
+              v-model="form.max_threads"
+              :min="1"
+              :max="64"
+              :disabled="processing"
+              size="small">
+            </el-input-number>
+          </div>
+          <el-checkbox v-model="form.enable_pdf" :disabled="processing">
+            完成后合并输出为 PDF
+          </el-checkbox>
+        </div>
+
+        <div class="progress-panel">
+          <div class="progress-meta">
+            <span>{{ phaseText }}</span>
+            <strong>{{ Math.round(progress) }}%</strong>
+          </div>
+          <el-progress
+            :percentage="Math.round(progress)"
+            :stroke-width="10"
+            :show-text="false"
+            color="#2f80ed">
+          </el-progress>
+          <div class="status-line" :class="{ active: processing }">
+            <i :class="processing ? 'el-icon-loading' : 'el-icon-info'"></i>
+            <span>{{ status }}</span>
+          </div>
+        </div>
+
+        <div class="action-row">
+          <el-button
+            type="danger"
+            plain
+            :disabled="!processing || phase === 'cancelling'"
+            @click="cancelTask">取消任务</el-button>
+          <el-button
+            :disabled="!canPause"
+            @click="togglePause">{{ paused ? '继续' : '暂停' }}</el-button>
+          <el-button
+            type="primary"
+            icon="el-icon-video-play"
+            :disabled="!bridgeReady || processing"
+            @click="startTask">开始处理</el-button>
+        </div>
+      </el-card>
+    </main>
+  </div>
+
+  <script src="vendor/es6-promise.auto.min.js"></script>
+  <script src="vendor/vue.min.js"></script>
+  <script src="vendor/element-ui.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
