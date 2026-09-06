@@ -30,7 +30,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='c2bw',
+    name='智能图像预处理工具 v3.0',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
