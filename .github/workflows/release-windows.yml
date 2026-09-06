@@ -22,7 +22,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-x86_64
-          path: "dist/智能图像预处理工具 v3.0.exe"
+          path: "dist/智能图像预处理工具 v3.1.exe"
 
   build-win7:
     runs-on: windows-latest
@@ -37,11 +37,11 @@ jobs:
           python -m pip install --upgrade "pip<24.1" "setuptools<60.7" "wheel<0.46"
           python -m pip install -r requirements-win7.txt
           python -m PyInstaller --noconfirm --clean c2bw_win7.spec
-          Rename-Item "dist/c2bw_win7.exe" "智能图像预处理工具 v3.0-Windows7.exe"
+          Rename-Item "dist/c2bw_win7.exe" "智能图像预处理工具 v3.1-Windows7.exe"
       - uses: actions/upload-artifact@v4
         with:
           name: windows7-x86_64
-          path: "dist/智能图像预处理工具 v3.0-Windows7.exe"
+          path: "dist/智能图像预处理工具 v3.1-Windows7.exe"
 
   release:
     needs: [build-win11, build-win7]
@@ -58,7 +58,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-assets/windows-x86_64/智能图像预处理工具 v3.0.exe
-            release-assets/windows7-x86_64/智能图像预处理工具 v3.0-Windows7.exe
+            release-assets/windows-x86_64/智能图像预处理工具 v3.1.exe
+            release-assets/windows7-x86_64/智能图像预处理工具 v3.1-Windows7.exe
             release-assets/c2bw-source.zip
           generate_release_notes: true
