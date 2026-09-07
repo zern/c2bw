@@ -16,7 +16,7 @@
         <h1>智能图像预处理工具</h1>
         <p>批量裁切、黑白二值化与 PDF 汇总</p>
       </div>
-      <el-tag class="version-tag" size="small" effect="plain">v3.1</el-tag>
+      <el-tag class="version-tag" size="small" effect="plain">v3.2</el-tag>
       <el-popover v-if="updateAvailable" placement="bottom-end" width="300" trigger="hover">
         <div class="update-popover">
           <div class="update-title">发现新版本 {{ updateInfo.version }}</div>
@@ -37,46 +37,102 @@
         show-icon>
       </el-alert>
 
+      <div class="mode-switch-wrapper">
+        <el-radio-group v-model="workMode" :disabled="processing" class="mode-radio-group">
+          <el-radio-button label="dir">
+            <i class="el-icon-folder-opened"></i> 从图片目录开始处理
+          </el-radio-button>
+          <el-radio-button label="pdf">
+            <i class="el-icon-document"></i> 从PDF文件开始处理
+          </el-radio-button>
+        </el-radio-group>
+      </div>
+
       <el-card class="section-card source-card" shadow="never">
         <div slot="header" class="card-heading">
-          <span class="heading-icon"><i class="el-icon-folder-opened"></i></span>
-          <span>文件目录</span>
+          <span class="heading-icon"><i :class="workMode === 'dir' ? 'el-icon-folder-opened' : 'el-icon-document'"></i></span>
+          <span>{{ workMode === 'dir' ? '图片目录' : 'PDF文件与目标目录' }}</span>
         </div>
 
-        <div class="directory-row">
-          <label>输入目录</label>
-          <el-input
-            v-model="form.source_dir"
-            :disabled="processing"
-            placeholder="请选择需要处理的图片文件夹">
-          </el-input>
-          <el-button
-            :loading="directoryLoading === 'source_dir'"
-            :disabled="processing"
-            icon="el-icon-folder-opened"
-            @click="selectDirectory('source_dir')">浏览</el-button>
-        </div>
+        <!-- 1. 从图片目录模式 -->
+        <template v-if="workMode === 'dir'">
+          <div class="directory-row">
+            <label>输入目录</label>
+            <el-input
+              v-model="form.source_dir"
+              :disabled="processing"
+              placeholder="请选择需要处理的图片文件夹">
+            </el-input>
+            <el-button
+              :loading="directoryLoading === 'source_dir'"
+              :disabled="processing"
+              icon="el-icon-folder-opened"
+              @click="selectDirectory('source_dir')">浏览</el-button>
+          </div>
 
-        <div class="directory-row">
-          <label>输出目录</label>
-          <el-input
-            v-model="form.target_dir"
-            :disabled="processing"
-            placeholder="默认在输入目录下创建 output 文件夹">
-          </el-input>
-          <el-button
-            :loading="directoryLoading === 'target_dir'"
-            :disabled="processing"
-            icon="el-icon-folder-opened"
-            @click="selectDirectory('target_dir')">浏览</el-button>
-        </div>
+          <div class="directory-row">
+            <label>输出目录</label>
+            <el-input
+              v-model="form.target_dir"
+              :disabled="processing"
+              placeholder="默认在输入目录下创建 output 文件夹">
+            </el-input>
+            <el-button
+              :loading="directoryLoading === 'target_dir'"
+              :disabled="processing"
+              icon="el-icon-folder-opened"
+              @click="selectDirectory('target_dir')">浏览</el-button>
+          </div>
 
-        <div class="directory-option">
-          <el-checkbox v-model="form.include_subfolders" :disabled="processing">
-            处理子文件夹内的文件
-          </el-checkbox>
-          <span>输出时保留目录结构，并自动排除本次输出目录</span>
-        </div>
+          <div class="directory-option">
+            <el-checkbox v-model="form.include_subfolders" :disabled="processing">
+              处理子文件夹内的文件
+            </el-checkbox>
+            <span>输出时保留目录结构，并自动排除本次输出目录</span>
+          </div>
+        </template>
+
+        <!-- 2. 从PDF文件模式 -->
+        <template v-else>
+          <div class="directory-row">
+            <label>PDF 文件</label>
+            <el-input
+              v-model="pdfForm.pdf_path"
+              :disabled="processing"
+              placeholder="请选择需要处理的图片打包型 PDF 文件">
+            </el-input>
+            <el-button
+              :loading="directoryLoading === 'pdf_file'"
+              :disabled="processing"
+              icon="el-icon-document"
+              @click="selectPdfFileForMode">选择文件</el-button>
+          </div>
+
+          <div class="directory-row">
+            <label>生成目录</label>
+            <el-input
+              :value="computedPdfTargetDir"
+              disabled
+              placeholder="选择 PDF 并选择处理任务后自动生成">
+            </el-input>
+            <el-tag size="medium" type="info" style="margin-left: 10px; flex-shrink: 0;">
+              {{ pdfForm.no_convert_pdf && !form.enable_crop && !form.enable_binarize ? '同名目录' : '同名+任务后缀' }}
+            </el-tag>
+          </div>
+
+          <div class="directory-option">
+            <el-checkbox v-model="pdfForm.no_convert_pdf" :disabled="processing">
+              不转换为PDF (仅保留处理后的图片文件)
+            </el-checkbox>
+          </div>
+
+          <div class="directory-option pdf-hint">
+            <i class="el-icon-info"></i>
+            <span v-if="pdfForm.no_convert_pdf && !form.enable_crop && !form.enable_binarize">将直接从 PDF 提取原始图片至同名目录，不进行裁切、色彩处理或转 PDF。</span>
+            <span v-else-if="pdfForm.no_convert_pdf">将从 PDF 提取原始图片至该同名目录并执行选定任务，保留处理后的图片文件夹，不合并为 PDF。</span>
+            <span v-else>将从 PDF 提取原始图片至该同名目录，执行选定任务并打包为新 PDF 后，自动删除临时分页图片，仅保留处理后的 PDF 文件。</span>
+          </div>
+        </template>
       </el-card>
 
       <div class="option-grid">
@@ -184,9 +240,32 @@
               size="small">
             </el-input-number>
           </div>
-          <el-checkbox v-model="form.enable_pdf" :disabled="processing">
-            完成后合并输出为 PDF
-          </el-checkbox>
+          <template v-if="workMode === 'dir'">
+            <el-checkbox v-model="form.enable_pdf" :disabled="processing">
+              完成后合并输出为 PDF
+            </el-checkbox>
+            <el-checkbox
+              v-if="form.enable_pdf"
+              v-model="form.keep_images_after_pdf"
+              :disabled="processing"
+              style="margin-left: 15px;">
+              合成PDF后保留处理后的图片
+            </el-checkbox>
+          </template>
+          <template v-else>
+            <el-checkbox v-model="pdfForm.no_convert_pdf" :disabled="processing">
+              不转换为PDF (仅保留处理后的图片)
+            </el-checkbox>
+            <el-tag v-if="!pdfForm.no_convert_pdf" size="small" type="success" effect="plain" style="margin-left: 10px;">
+              <i class="el-icon-check"></i> 处理后自动转为新 PDF 并清理分页图片
+            </el-tag>
+            <el-tag v-else-if="!form.enable_crop && !form.enable_binarize" size="small" type="warning" effect="plain" style="margin-left: 10px;">
+              <i class="el-icon-download"></i> 直接提取 PDF 原始图片至同名目录
+            </el-tag>
+            <el-tag v-else size="small" type="warning" effect="plain" style="margin-left: 10px;">
+              <i class="el-icon-folder"></i> 仅输出处理后的图片文件夹
+            </el-tag>
+          </template>
         </div>
 
         <div class="progress-panel">

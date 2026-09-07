@@ -1,137 +1,155 @@
-# c2bw 项目简要说明与跨平台编译指南
+# c2bw 智能图像预处理工具
 
 ## 一、项目简介
 
-`c2bw` 是一款批量图像预处理工具，主要用于扫描图片的分页裁切、黑白二值化和 PDF 汇总。
+`c2bw`（Color to Black & White）是一款高效、专业的批量图像与扫描文档预处理工具，主要用于书籍扫描、文献归档中的图片双页裁切、黑白二值化、无损原图提取以及高清紧凑 PDF 汇总。
 
-当前版本：**3.0**
+当前版本：**v3.2**
 
-主要功能：
+### 核心特性
 
-- 批量处理 JPG、JPEG、PNG、TIF、TIFF、BMP、JP2 图片
-- 双页图片自动裁切为左右两个页面
-- OTSU 自适应或自定义阈值黑白二值化
-- 多线程处理、暂停、继续和取消任务
-- 支持处理子文件夹并保持目录结构
-- 自动生成单个或按子文件夹分别生成 PDF
-- PDF 默认单页布局、适合页面显示
-- 任务完成后打开输出目录
-- 从服务器读取版本更新信息并显示更新提醒
-- Vue 2 + Element UI 界面，通过 pywebview 调用 Python 本地处理服务
+- **双工作模式支持**：
+  - **从图片目录开始处理**：支持单目录或递归遍历子文件夹，保持原有目录层级结构；
+  - **从 PDF 文件开始处理**：直接读取图片打包型 PDF，无损提取原始分页图片，流水线式执行预处理与重构。
+- **丰富的图像格式兼容**：
+  - 批量读取与处理 JPG、JPEG、PNG、TIF、TIFF、BMP、JP2 等主流格式；
+- **智能分页与裁切**：
+  - 双页跨页扫描图自动分割为单页，支持自定义分割中线比例（1%~100%）；
+  - 支持从右至左（古籍/竖排版）与从左至右（现代横排版）阅读顺序；
+  - 具备宽高比智能识别，自动跳过封面、单页插图等无需裁切的页面。
+- **高质量黑白二值化**：
+  - 提供 OTSU 自适应阈值算法与 0~100% 自定义阈值二值化；
+  - 二值化结果输出为标准 1 位 Group 4 TIFF，极佳保留笔画细节。
+- **高效 PDF 流封装（极小体积、拒绝反相）**：
+  - 黑白二值图打包 PDF 采用底层 CCITT Group 4（`/CCITTFaxDecode`，2-D）直接压缩封装，体积较常规 PDF 打包缩减 99% 以上；
+  - 严格校准极性参数（`/BlackIs1`），彻底修复主流阅读器（Adobe Acrobat、Chrome、Edge、SumatraPDF 等）中的黑白反相问题，呈现完美白底黑字；
+  - 彩色/灰度图片智能采用 DCT/JPEG 直通压缩流，不损失画质；
+  - 输出 PDF 自动设置适合窗口单页视图（`/Fit` + `/SinglePage`）。
+- **灵活的生成与清理控制**：
+  - **PDF 模式 - 不转换为PDF**：仅输出处理后的图片文件夹，不合成新 PDF；
+  - **PDF 模式 - 纯提取模式**：勾选「不转换为PDF」且未勾选裁切与二值化时，自动生成与 PDF 同名的目录，直接无损提取内部所有原始分页图片；
+  - **图片目录模式 - 清理控制**：合成 PDF 后默认自动清理处理后的中间图片（仅保留最终 PDF）；勾选「合成PDF后保留处理后的图片」可同时保留图片和 PDF。
+- **现代化双界面与高可用容灾**：
+  - 基于 Vue 2 + Element UI 的轻量现代化本地图形界面；
+  - 具备多线程并发、实时进度反馈、任务暂停、继续与安全取消机制；
+  - **老系统自动降级保护**：Windows 7 下自动匹配 IE11/MSHTML；若缺少 .NET 4.0 或浏览器组件受损，无感自动降级启动原生 Tkinter 桌面窗口；支持命令行 `--tk` 直接进入原生界面。
+
+---
 
 ## 二、项目结构
 
 ```text
-c2bw.py                 Python 图像处理、PDF 生成和本地服务
-webui/                  Vue 2 + Element UI 前端资源
+c2bw.py                 主程序（图像处理算法、PDF 底层封装、Web 服务与 GUI）
+webui/                  Vue 2 + Element UI 现代化前端资源
   index.html            界面结构
-  app.js                Vue 业务逻辑和 pywebview 调用
+  app.js                Vue 业务逻辑与桥接调用
   style.css             界面样式
-  vendor/               Vue、Element UI 和字体等离线资源
-c2bw.spec               Windows 10/11 等新系统打包配置
-c2bw_win7.spec         Windows 7 兼容打包配置
-build_win7.bat         Windows 7 自动构建脚本
-requirements.txt       常规环境依赖
-requirements-win7.txt  Windows 7 构建依赖
-version_info.txt       Windows 文件版本信息
-使用说明.md             用户操作说明
+  vendor/               Vue、Element UI 和字体等离线依赖资源
+c2bw.spec               Windows 10/11 标准打包配置
+c2bw_win7.spec         Windows 7 专用独立版打包配置
+build_win7.bat         Windows 7 一键自动化构建脚本
+requirements.txt       标准运行依赖
+requirements-win7.txt  Windows 7 兼容构建依赖
+version_info.txt       Windows 可执行文件版本元数据
 ```
+
+---
 
 ## 三、直接运行源码
 
-建议使用 Python 3.8 及以上版本。进入项目目录后执行：
+建议使用 Python 3.8 及以上版本（Windows 7 请使用 CPython 3.8.x x64）。
 
-```bash
-python -m venv .venv
-```
+进入项目根目录：
 
-Windows：
+### Windows：
 
 ```bat
+python -m venv .venv
 .venv\Scripts\activate
 python -m pip install -r requirements.txt
 python c2bw.py
 ```
 
-Linux/macOS：
+若希望在旧系统上直接以原生 Tkinter 界面运行，可附带 `--tk` 参数：
+
+```bat
+python c2bw.py --tk
+```
+
+### Linux / macOS：
 
 ```bash
+python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 python c2bw.py
 ```
 
-## 四、Windows 编译单文件程序
+---
 
-### Windows 10/11
+## 四、Windows 编译可执行程序
+
+### 1. Windows 10 / 11 标准版
+
+使用 Python 3.8 环境，执行以下命令即可打包单文件程序：
 
 ```bat
-python -m venv .venv-build
-.venv-build\Scripts\activate
-python -m pip install -r requirements.txt
-python -m pip install pyinstaller
+copy "%APPDATA%\Python\Python38\site-packages\pythonnet\runtime\Python.Runtime.dll" .
 python -m PyInstaller --noconfirm --clean c2bw.spec
+del Python.Runtime.dll
 ```
 
-生成文件通常位于：
+生成产物位于 `dist\`：
+- `dist\智能图像预处理工具 v3.2.exe`
+- `dist\c2bw_v3.2.exe`
 
-```text
-dist\c2bw.exe
-```
+### 2. Windows 7 专用独立版
 
-### Windows 7
-
-Windows 7 必须使用 CPython 3.8 x64，并建议在 Windows 7 SP1 环境中构建：
+Windows 7 环境建议使用 CPython 3.8.x x64，直接双击运行自动化脚本：
 
 ```bat
 build_win7.bat
 ```
 
-或手动执行：
+或手动执行打包命令：
 
 ```bat
-python -m venv .venv-win7
-.venv-win7\Scripts\activate
-python -m pip install -r requirements-win7.txt
+copy "%APPDATA%\Python\Python38\site-packages\pythonnet\runtime\Python.Runtime.dll" .
 python -m PyInstaller --noconfirm --clean c2bw_win7.spec
+del Python.Runtime.dll
 ```
 
-生成文件：`dist\c2bw_win7.exe`。
+生成产物位于 `dist\`：
+- `dist\智能图像预处理工具 v3.2_Win7.exe`
+- `dist\c2bw_win7.exe`
+- `dist\c2bw_v3.2_win7.exe`
 
-## 五、Linux 编译单文件程序
+---
 
-PyInstaller 需要在 Linux 系统中构建 Linux 程序，不能直接在 Windows 上交叉编译。
+## 五、Linux / macOS 编译
+
+PyInstaller 不支持跨平台交叉编译，请在对应系统中进行构建。
+
+### Linux：
 
 ```bash
 python3 -m venv .venv-build
 source .venv-build/bin/activate
-python -m pip install --upgrade pip
 python -m pip install -r requirements.txt pyinstaller
 python -m PyInstaller --noconfirm --clean --onefile --windowed \
   --name c2bw \
   --add-data "webui:webui" \
   c2bw.py
-```
-
-生成文件：`dist/c2bw`。
-
-运行：
-
-```bash
 chmod +x dist/c2bw
 ./dist/c2bw
 ```
+*注：Linux 下需保证系统安装有 WebKitGTK 运行环境。*
 
-Linux 还需要安装 pywebview 所需的 GTK/WebKit 运行库，具体包名按发行版安装。
-
-## 六、macOS 编译单文件程序
-
-PyInstaller 需要在 macOS 系统中构建 macOS 程序。建议使用与目标电脑相同的 CPU 架构构建（Intel 或 Apple Silicon）。
+### macOS：
 
 ```bash
 python3 -m venv .venv-build
 source .venv-build/bin/activate
-python -m pip install --upgrade pip
 python -m pip install -r requirements.txt pyinstaller
 python -m PyInstaller --noconfirm --clean --onefile --windowed \
   --name c2bw \
@@ -139,24 +157,17 @@ python -m PyInstaller --noconfirm --clean --onefile --windowed \
   c2bw.py
 ```
 
-生成文件：`dist/c2bw`。
+---
 
-如需生成 macOS 应用包，可去掉 `--onefile` 并使用：
+## 六、注意事项与常见问题
 
-```bash
-python -m PyInstaller --noconfirm --clean --windowed \
-  --name c2bw \
-  --add-data "webui:webui" \
-  c2bw.py
-```
-
-生成：`dist/c2bw.app`。
-
-## 七、跨平台编译注意事项
-
-- PyInstaller 不能把 Windows 程序直接编译成 Linux 或 macOS 程序，三类系统应分别构建。
-- `--add-data` 的分隔符不同：Linux/macOS 使用冒号 `:`，Windows 使用分号 `;`。
-- 首次启动时，pywebview 需要系统可用的网页渲染后端。
-- 服务器版本检查失败时会静默跳过，不影响图像处理。
-- 发布前应在目标系统测试目录选择、图片处理、PDF 输出和打开输出目录功能。
-- 发布单文件前建议删除旧的 `build`、`dist` 目录，避免误用旧产物。
+1. **二值化 PDF 体积与黑白反相说明**：
+   - 本工具使用底层 `pypdf` 直接封装 1 位 CCITT Group 4 传真压缩数据流，生成的二值化 PDF 体积极其轻巧（百页仅数百 KB）；
+   - 彻底解决传统工具将黑白二值图转为 RGB/灰度再封装导致的体积暴增和反相问题。
+2. **Windows 7 运行说明**：
+   - Windows 7 需安装 SP1 及补丁（KB2533623 或 KB3063858）；
+   - Win7 独立版自带运行时，优先通过 MSHTML 启动现代界面；若系统环境不支持，将自动启动原生 Tkinter 界面，无需额外配置。
+3. **输出目录安全限制**：
+   - 输出目录不能与输入目录相同，也不能是输入目录的父目录，避免覆盖或误删输入原图。
+4. **清理规则**：
+   - PDF 模式下，完成新 PDF 生成后会自动清理临时提取的分页图片；若勾选「不转换为PDF」，则会保留处理好的图片文件夹并自动删除中间临时原图。

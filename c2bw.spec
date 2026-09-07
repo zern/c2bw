@@ -1,48 +1,58 @@
 # -*- mode: python ; coding: utf-8 -*-
 
 
+import os
+import clr_loader
+import pythonnet
+
+clr_loader_dir = os.path.dirname(clr_loader.__file__)
+pythonnet_dir = os.path.dirname(pythonnet.__file__)
+os.environ['PATH'] = os.getcwd() + os.pathsep + os.environ.get('PATH', '')
+
+added_datas = [
+    ('webui', 'webui'),
+    (os.path.join(pythonnet_dir, 'runtime'), 'pythonnet/runtime'),
+    (os.path.join(clr_loader_dir, 'ffi', 'dlls'), 'clr_loader/ffi/dlls'),
+]
+
 a = Analysis(
     ['c2bw.py'],
     pathex=[],
     binaries=[],
-    datas=[('webui', 'webui')],
+    datas=added_datas,
     hiddenimports=[
-        'pkg_resources',
         'PIL.JpegImagePlugin',
         'PIL.PdfImagePlugin',
         'pypdf',
         'webview',
         'webview.platforms.winforms',
         'clr',
+        'clr_loader',
+        'pythonnet',
     ],
     hookspath=[],
-    hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['pkg_resources'],
+    win_no_prefer_redirects=False,
+    win_private_assemblies=False,
+    cipher=None,
     noarchive=False,
-    optimize=0,
 )
-pyz = PYZ(a.pure)
+pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
 exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
+    a.zipfiles,
     a.datas,
     [],
-    name='智能图像预处理工具 v3.1',
+    name='智能图像预处理工具 v3.2',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
+    upx=False,
     console=False,
-    disable_windowed_traceback=False,
-    argv_emulation=False,
-    target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    icon='hanji.ico',
     version='version_info.txt',
-    icon=['hanji.ico'],
 )

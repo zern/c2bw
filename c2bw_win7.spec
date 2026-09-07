@@ -1,23 +1,38 @@
 # -*- mode: python ; coding: utf-8 -*-
-# 兼容 PyInstaller 4.10 / CPython 3.8 的 Windows 7 打包配置。
+# 兼容 Windows 7 (CPython 3.8 x64) 的独立单文件打包配置。
+
+import os
+import clr_loader
+import pythonnet
+
+clr_loader_dir = os.path.dirname(clr_loader.__file__)
+pythonnet_dir = os.path.dirname(pythonnet.__file__)
+os.environ['PATH'] = os.getcwd() + os.pathsep + os.environ.get('PATH', '')
+
+added_datas = [
+    ('webui', 'webui'),
+    (os.path.join(pythonnet_dir, 'runtime'), 'pythonnet/runtime'),
+    (os.path.join(clr_loader_dir, 'ffi', 'dlls'), 'clr_loader/ffi/dlls'),
+]
 
 a = Analysis(
     ['c2bw.py'],
     pathex=[],
     binaries=[],
-    datas=[('webui', 'webui')],
+    datas=added_datas,
     hiddenimports=[
-        'pkg_resources',
         'PIL.JpegImagePlugin',
         'PIL.PdfImagePlugin',
         'pypdf',
         'webview',
         'webview.platforms.winforms',
         'clr',
+        'clr_loader',
+        'pythonnet',
     ],
     hookspath=[],
     runtime_hooks=[],
-    excludes=[],
+    excludes=['pkg_resources'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=None,
@@ -32,11 +47,11 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='c2bw_win7',
+    name='智能图像预处理工具 v3.2_Win7',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    upx=False,
     console=False,
     icon='hanji.ico',
     version='version_info.txt',

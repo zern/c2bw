@@ -3,8 +3,8 @@
 
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(3, 1, 0, 0),
-    prodvers=(3, 1, 0, 0),
+    filevers=(3, 2, 0, 0),
+    prodvers=(3, 2, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -18,13 +18,13 @@ VSVersionInfo(
       StringTable(
         u'080404b0',
         [StringStruct(u'CompanyName', u'汉籍合璧'),
-        StringStruct(u'FileDescription', u'智能图像预处理工具 v3.1'),
-        StringStruct(u'FileVersion', u'3.1.0.0'),
+        StringStruct(u'FileDescription', u'智能图像预处理工具 v3.2'),
+        StringStruct(u'FileVersion', u'3.2.0.0'),
         StringStruct(u'InternalName', u'c2bw_processor'),
         StringStruct(u'LegalCopyright', u'Copyright (c) 2026 weiceng'),
-        StringStruct(u'OriginalFilename', u'智能图像预处理工具 v3.1.exe'),
-        StringStruct(u'ProductName', u'智能图像预处理工具 v3.1'),
-        StringStruct(u'ProductVersion', u'3.1.0.0')])
+        StringStruct(u'OriginalFilename', u'智能图像预处理工具 v3.2.exe'),
+        StringStruct(u'ProductName', u'智能图像预处理工具 v3.2'),
+        StringStruct(u'ProductVersion', u'3.2.0.0')])
       ]),
     VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
   ]

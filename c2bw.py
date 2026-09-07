@@ -1,6 +1,12 @@
 import os
 import sys
+import multiprocessing
+
+multiprocessing.freeze_support()
+
+import io
 import shutil
+import tempfile
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import tkinter.font as tkfont
@@ -14,15 +20,213 @@ import urllib.request
 import numpy as np
 from PIL import Image, JpegImagePlugin, PdfImagePlugin  # 显式导入以确保打包程序包含 PDF 编码器。
 from pypdf import PdfReader, PdfWriter
-from pypdf.generic import ArrayObject, NameObject
+from pypdf.generic import (
+    ArrayObject, NameObject, StreamObject,
+    BooleanObject, NumberObject, DictionaryObject, DecodedStreamObject
+)
+from pypdf.filters import decode_stream_data
+import pypdf.filters
 import webview
+
+# 针对 pypdf 部分版本在遇到末尾缺少 '>' 的 ASCIIHexDecode 数据流时报错的兼容性补丁
+_orig_asciihex_decode = pypdf.filters.ASCIIHexDecode.decode
+def _safe_asciihex_decode(data, decode_parms=None):
+    if isinstance(data, str):
+        data = data.encode('ascii')
+    stripped = data.rstrip()
+    if not stripped.endswith(b'>'):
+        data = stripped + b'>'
+    return _orig_asciihex_decode(data, decode_parms)
+pypdf.filters.ASCIIHexDecode.decode = staticmethod(_safe_asciihex_decode)
+
+
+def _resolve_pdf_xobject(page, img_id):
+    """从页面对象中解析指定 ID 的 XObject 数据流对象。"""
+    curr = page
+    path = list(img_id) if isinstance(img_id, (list, tuple)) else [img_id]
+    for part in path:
+        if isinstance(part, str) and part.startswith('~') and part.endswith('~'):
+            return None
+        try:
+            res = curr.get('/Resources')
+            if hasattr(res, 'get_object'):
+                res = res.get_object()
+            if not res:
+                return None
+            xobjs = res.get('/XObject')
+            if hasattr(xobjs, 'get_object'):
+                xobjs = xobjs.get_object()
+            if not xobjs or part not in xobjs:
+                return None
+            curr = xobjs[part]
+            if hasattr(curr, 'get_object'):
+                curr = curr.get_object()
+        except Exception:
+            return None
+    return curr
+
+
+def _extract_raw_image_from_xobj(xobj):
+    """直接从 XObject 提取未重压缩的原始图片数据流，保证 100% 原始画质与参数不变。"""
+    if not isinstance(xobj, StreamObject):
+        return None, None
+
+    filters = xobj.get('/Filter')
+    if hasattr(filters, 'get_object'):
+        filters = filters.get_object()
+    if isinstance(filters, (list, tuple, ArrayObject)):
+        filter_names = [f.get_object() if hasattr(f, 'get_object') else f for f in filters]
+    elif filters:
+        filter_names = [filters]
+    else:
+        filter_names = []
+
+    try:
+        data = decode_stream_data(xobj)
+    except Exception:
+        data = None
+
+    if data:
+        # 1. 检查已知图像格式文件头魔数
+        if data.startswith(b'\xff\xd8'):
+            return '.jpg', data
+        if data.startswith(b'II*\x00') or data.startswith(b'MM\x00*'):
+            return '.tif', data
+        if data.startswith(b'\x89PNG\r\n\x1a\n'):
+            return '.png', data
+        if data.startswith(b'\x00\x00\x00\x0cjP  ') or data.startswith(b'\xffO\xffQ'):
+            return '.jp2', data
+        if data.startswith(b'BM'):
+            return '.bmp', data
+
+        # 2. 根据滤镜类型匹配对应扩展名（DCT 为原始 JPEG，JPX 为 JPEG2000，CCITT 为 TIFF）
+        last_filter = filter_names[-1] if filter_names else None
+        if last_filter in ('/DCTDecode', '/DCT'):
+            return '.jpg', data
+        if last_filter in ('/JPXDecode',):
+            return '.jp2', data
+        if last_filter in ('/CCITTFaxDecode',):
+            return '.tif', data
+
+    return None, None
+
+
+def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cancel_event=None):
+    """从图片打包型 PDF 中提取所有原始分页图片到指定目录（保持原图质量与参数，不作有损重压缩）。"""
+    try:
+        reader = PdfReader(pdf_path)
+    except Exception as e:
+        return 0, f"打开 PDF 失败: {str(e)}"
+
+    total_pages = len(reader.pages)
+    if total_pages == 0:
+        return 0, "PDF 中没有有效页面。"
+
+    os.makedirs(extract_dir, exist_ok=True)
+    extracted_count = 0
+
+    for p_idx, page in enumerate(reader.pages):
+        if cancel_event and cancel_event.is_set():
+            return extracted_count, "已取消提取。"
+        page_num = p_idx + 1
+
+        try:
+            img_keys = list(page.images.keys())
+        except Exception:
+            img_keys = []
+
+        # 兜底：若未获取到 keys，尝试直接从 Resources['/XObject'] 抓取
+        if not img_keys:
+            try:
+                res = page.get('/Resources')
+                if hasattr(res, 'get_object'):
+                    res = res.get_object()
+                if res and '/XObject' in res:
+                    xobjs = res['/XObject']
+                    if hasattr(xobjs, 'get_object'):
+                        xobjs = xobjs.get_object()
+                    if isinstance(xobjs, dict):
+                        img_keys = [
+                            k for k, v in xobjs.items()
+                            if hasattr(v, 'get_object') and getattr(v.get_object(), 'get', lambda *_: None)('/Subtype') == '/Image'
+                        ]
+            except Exception:
+                img_keys = []
+
+        page_extracted = []
+        for img_id in img_keys:
+            if cancel_event and cancel_event.is_set():
+                return extracted_count, "已取消提取。"
+
+            ext = None
+            data = None
+
+            # 优先 1：直接从 XObject 解码原始数据流，避免二次重压缩带来的画质与参数损失
+            xobj = _resolve_pdf_xobject(page, img_id)
+            if xobj is not None:
+                ext, data = _extract_raw_image_from_xobj(xobj)
+
+            # 兜底 2：若非标准内嵌图像流（如 Flate 原始栅格位图或行内图片），回退至 pypdf 的无损转换
+            if not data:
+                try:
+                    img_obj = page.images[img_id]
+                    ext = os.path.splitext(img_obj.name)[1].lower()
+                    data = img_obj.data
+                except Exception:
+                    data = None
+
+            if not data:
+                continue
+
+            if not ext or ext not in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2']:
+                ext = '.jpg'
+            if ext == '.jpeg':
+                ext = '.jpg'
+            elif ext == '.tiff':
+                ext = '.tif'
+
+            page_extracted.append((ext, data))
+
+        total_in_page = len(page_extracted)
+        for sub_idx, (ext, data) in enumerate(page_extracted):
+            if total_in_page == 1:
+                filename = f"page_{page_num:04d}{ext}"
+            else:
+                filename = f"page_{page_num:04d}_{sub_idx+1:02d}{ext}"
+            save_path = os.path.join(extract_dir, filename)
+            try:
+                with open(save_path, 'wb') as f:
+                    f.write(data)
+                extracted_count += 1
+            except Exception as write_err:
+                return extracted_count, f"写入图片失败: {str(write_err)}"
+
+        if progress_callback:
+            progress_callback(page_num, total_pages, f"正在提取 PDF 原始图片：{page_num} / {total_pages} 页...")
+
+    if extracted_count == 0:
+        return 0, "该 PDF 中未检测到可提取的分页图片（可能为纯文本矢量排版或受保护）。"
+
+    return extracted_count, ""
+
+
+def get_task_suffix(enable_crop, enable_binarize):
+    """根据选择的处理任务生成对应的目录与文件后缀。"""
+    if enable_crop and enable_binarize:
+        return "_已裁切_黑白版"
+    elif enable_crop:
+        return "_已裁切"
+    elif enable_binarize:
+        return "_黑白版"
+    return ""
+
 
 class ImageProcessorApp:
     PDF_APPLICATION_NAME = "SHUGE.ORG"
 
     def __init__(self, root):
         self.root = root
-        self.root.title("智能图像预处理工具 v3.1")
+        self.root.title("智能图像预处理工具 v3.2")
         # 在较矮的屏幕上留出系统任务栏空间，其他内容通过滚动条访问。
         window_height = min(820, max(480, self.root.winfo_screenheight() - 100))
         self.root.geometry(f"700x{window_height}")
@@ -39,6 +243,9 @@ class ImageProcessorApp:
         style.configure('TLabelframe.Label', font=('Microsoft YaHei', 11, 'bold'))
 
         # === 变量定义 ===
+        self.work_mode = tk.StringVar(value="dir")
+        self.pdf_file_path = tk.StringVar()
+        self.pdf_target_preview = tk.StringVar()
         self.source_dir = tk.StringVar()
         self.target_dir = tk.StringVar()
         self.max_threads = tk.IntVar(value=8)
@@ -58,6 +265,8 @@ class ImageProcessorApp:
         self.crop_direction = tk.StringVar(value="R2L") 
         self.exclude_ratio = tk.DoubleVar(value=0.7) 
         self.enable_pdf = tk.BooleanVar(value=False)
+        self.keep_images_after_pdf = tk.BooleanVar(value=False)
+        self.pdf_no_convert = tk.BooleanVar(value=False)
 
         # --- 状态与线程控制 ---
         self.is_processing = False
@@ -98,25 +307,69 @@ class ImageProcessorApp:
         self.content_canvas.bind("<Configure>", self._fit_content_width)
         self.root.bind_all("<MouseWheel>", self._scroll_with_mousewheel, add="+")
 
-        # --- 1. 目录选择区域 ---
-        dir_frame = ttk.Frame(main_frame)
-        dir_frame.grid(row=0, column=0, sticky=tk.EW, pady=(0, 10))
-        ttk.Label(dir_frame, text="输入目录:").grid(row=0, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(dir_frame, textvariable=self.source_dir, width=47).grid(row=0, column=1, pady=5, padx=10)
-        ttk.Button(dir_frame, text="浏览...", command=self.select_source_dir).grid(row=0, column=2, pady=5)
+        # --- 模式选择区域 ---
+        mode_frame = ttk.LabelFrame(main_frame, text="工作模式", padding="10")
+        mode_frame.grid(row=0, column=0, sticky=tk.EW, pady=(0, 10))
+        ttk.Radiobutton(
+            mode_frame, text="从图片目录开始处理", variable=self.work_mode, value="dir", command=self._on_mode_changed
+        ).pack(side=tk.LEFT, padx=15)
+        ttk.Radiobutton(
+            mode_frame, text="从PDF文件开始处理", variable=self.work_mode, value="pdf", command=self._on_mode_changed
+        ).pack(side=tk.LEFT, padx=15)
 
-        ttk.Label(dir_frame, text="输出目录:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(dir_frame, textvariable=self.target_dir, width=47).grid(row=1, column=1, pady=5, padx=10)
-        ttk.Button(dir_frame, text="浏览...", command=lambda: self.select_dir(self.target_dir)).grid(row=1, column=2, pady=5)
+        # --- 1. 输入区域容器 ---
+        self.input_card_frame = ttk.Frame(main_frame)
+        self.input_card_frame.grid(row=1, column=0, sticky=tk.EW, pady=(0, 10))
 
-        # 新增：包含子文件夹的复选框
-        ttk.Checkbutton(dir_frame, text="处理子文件夹内的文件 (自动排除输出目录)", variable=self.include_subfolders).grid(row=2, column=1, sticky=tk.W, pady=5, padx=5)
+        # 1.1 目录选择区域
+        self.dir_frame = ttk.Frame(self.input_card_frame)
+        ttk.Label(self.dir_frame, text="输入目录:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.dir_frame, textvariable=self.source_dir, width=44).grid(row=0, column=1, pady=5, padx=8)
+        ttk.Button(self.dir_frame, text="浏览...", command=self.select_source_dir, width=7).grid(row=0, column=2, pady=5, sticky=tk.W)
+
+        ttk.Label(self.dir_frame, text="输出目录:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.dir_frame, textvariable=self.target_dir, width=44).grid(row=1, column=1, pady=5, padx=8)
+        ttk.Button(self.dir_frame, text="浏览...", command=lambda: self.select_dir(self.target_dir), width=7).grid(row=1, column=2, pady=5, sticky=tk.W)
+
+        ttk.Checkbutton(self.dir_frame, text="处理子文件夹内的文件 (自动排除输出目录)", variable=self.include_subfolders).grid(row=2, column=1, sticky=tk.W, pady=3, padx=5)
+        ttk.Checkbutton(
+            self.dir_frame,
+            text="合成PDF后保留处理后的图片 (默认不选，转换为PDF后自动清理图片)",
+            variable=self.keep_images_after_pdf,
+        ).grid(row=3, column=1, sticky=tk.W, pady=3, padx=5)
+
+        # 1.2 PDF 选择区域
+        self.pdf_frame = ttk.Frame(self.input_card_frame)
+        ttk.Label(self.pdf_frame, text="PDF 文件:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.pdf_frame, textvariable=self.pdf_file_path, width=44).grid(row=0, column=1, pady=5, padx=8)
+        ttk.Button(self.pdf_frame, text="浏览...", command=self.select_pdf_file_for_mode, width=7).grid(row=0, column=2, pady=5, sticky=tk.W)
+
+        ttk.Label(self.pdf_frame, text="生成目录:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.pdf_frame, textvariable=self.pdf_target_preview, width=44, state="readonly").grid(row=1, column=1, pady=5, padx=8)
+        ttk.Label(self.pdf_frame, text="(同名+任务后缀)").grid(row=1, column=2, sticky=tk.W, pady=5)
+
+        ttk.Checkbutton(
+            self.pdf_frame,
+            text="不转换为PDF (仅保留处理后的图片文件)",
+            variable=self.pdf_no_convert,
+            command=self._update_pdf_hint,
+        ).grid(row=2, column=1, sticky=tk.W, pady=3, padx=5)
+
+        self.pdf_hint_label = ttk.Label(
+            self.pdf_frame,
+            text="提示: 提取原图并完成处理后，将自动合并为新 PDF 并删除临时分页图片",
+            font=('Microsoft YaHei', 9),
+            foreground="#0284c7"
+        )
+        self.pdf_hint_label.grid(row=3, column=1, columnspan=2, sticky=tk.W, pady=3)
+
+        self.dir_frame.pack(fill=tk.X)
 
         # --- 2. 二值化参数区域 ---
         bin_frame = ttk.LabelFrame(main_frame, text="色彩处理", padding="15")
-        bin_frame.grid(row=1, column=0, sticky=tk.EW, pady=8)
+        bin_frame.grid(row=2, column=0, sticky=tk.EW, pady=8)
 
-        cb_bin = ttk.Checkbutton(bin_frame, text="转化为黑白二值图 (压缩体积，强化文字)", variable=self.enable_binarize, command=self.toggle_bin_options)
+        cb_bin = ttk.Checkbutton(bin_frame, text="转化为黑白二值图 (1位 TIFF Group 4, 强化文字压缩体积)", variable=self.enable_binarize, command=self.toggle_bin_options)
         cb_bin.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
 
         self.bin_options_frame = ttk.Frame(bin_frame)
@@ -151,7 +404,7 @@ class ImageProcessorApp:
 
         # --- 3. 裁切参数区域 ---
         crop_frame = ttk.LabelFrame(main_frame, text="分页处理", padding="15")
-        crop_frame.grid(row=2, column=0, sticky=tk.EW, pady=8)
+        crop_frame.grid(row=3, column=0, sticky=tk.EW, pady=8)
 
         cb_crop = ttk.Checkbutton(crop_frame, text="启用页面一分为二裁切", variable=self.enable_crop, command=self.toggle_crop_options)
         cb_crop.grid(row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
@@ -174,7 +427,7 @@ class ImageProcessorApp:
 
         # --- 4. 性能与控制区域 ---
         sys_frame = ttk.Frame(main_frame)
-        sys_frame.grid(row=3, column=0, sticky=tk.EW, pady=20)
+        sys_frame.grid(row=4, column=0, sticky=tk.EW, pady=20)
         
         ttk.Label(sys_frame, text="最大线程数:").pack(side=tk.LEFT)
         ttk.Entry(sys_frame, textvariable=self.max_threads, width=8).pack(side=tk.LEFT, padx=10)
@@ -188,11 +441,11 @@ class ImageProcessorApp:
         # --- 5. 状态与进度 ---
         self.progress_var = tk.DoubleVar()
         self.progress_bar = ttk.Progressbar(main_frame, variable=self.progress_var, maximum=100)
-        self.progress_bar.grid(row=4, column=0, sticky=tk.EW, pady=10)
+        self.progress_bar.grid(row=5, column=0, sticky=tk.EW, pady=10)
 
         # 操作按钮独占一行，避免与性能选项争夺水平空间。
         control_frame = ttk.Frame(main_frame)
-        control_frame.grid(row=5, column=0, sticky=tk.EW, pady=(0, 8))
+        control_frame.grid(row=6, column=0, sticky=tk.EW, pady=(0, 8))
 
         self.start_btn = ttk.Button(control_frame, text="开始处理", command=self.start_processing)
         self.start_btn.pack(side=tk.RIGHT)
@@ -210,7 +463,7 @@ class ImageProcessorApp:
             wraplength=610,
             justify=tk.LEFT,
         )
-        self.status_label.grid(row=6, column=0, sticky=tk.EW)
+        self.status_label.grid(row=7, column=0, sticky=tk.EW)
         
         self.toggle_bin_options()
         self.toggle_crop_options()
@@ -232,6 +485,103 @@ class ImageProcessorApp:
             self.source_dir.set(folder_selected)
             self.target_dir.set(os.path.join(folder_selected, "output"))
 
+    def open_pdf_file(self):
+        if self.is_processing:
+            messagebox.showwarning("任务运行中", "当前已有任务正在运行，请等待或取消后再打开 PDF。")
+            return
+        pdf_path = filedialog.askopenfilename(
+            title="选择要提取图片的 PDF 文件",
+            filetypes=[("PDF 文件", "*.pdf"), ("所有文件", "*.*")]
+        )
+        if not pdf_path:
+            return
+
+        pdf_dir = os.path.dirname(pdf_path)
+        pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        extract_dir = os.path.join(pdf_dir, pdf_name)
+
+        msg = f"已选择 PDF 文件：\n{pdf_path}\n\n是否提取分页图片到同名目录：\n{extract_dir}？"
+        if os.path.exists(extract_dir) and os.path.isdir(extract_dir) and os.listdir(extract_dir):
+            msg += "\n\n注意：目标图片文件夹已存在且非空，继续提取可能会覆盖同名文件！"
+
+        if not messagebox.askyesno("提取确认", msg, icon='question'):
+            return
+
+        self.is_processing = True
+        self.cancel_event.clear()
+        self.pause_event.set()
+        self.start_btn.config(state=tk.DISABLED)
+        self.pause_btn.config(state=tk.DISABLED)
+        self.cancel_btn.config(state=tk.NORMAL)
+        self.progress_var.set(0)
+        self.status_label.config(text="正在读取并提取 PDF 原始分页图片...")
+
+        def _do_extract():
+            def _progress(cur, total, msg):
+                self.ui_events.put(('progress', (cur / total) * 100, msg))
+
+            count, err = extract_images_from_pdf(
+                pdf_path, extract_dir, progress_callback=_progress, cancel_event=self.cancel_event
+            )
+            self.ui_events.put(('pdf_extracted', pdf_path, extract_dir, count, err))
+
+        threading.Thread(target=_do_extract, daemon=True).start()
+        self.root.after(50, self._poll_ui_events)
+
+    def _update_pdf_target_preview(self, *args):
+        path = self.pdf_file_path.get().strip()
+        if not path:
+            self.pdf_target_preview.set("")
+            return
+        pdf_dir = os.path.dirname(os.path.abspath(path))
+        pdf_name = os.path.splitext(os.path.basename(path))[0]
+        suffix = get_task_suffix(self.enable_crop.get(), self.enable_binarize.get())
+        if not suffix:
+            if self.pdf_no_convert.get():
+                self.pdf_target_preview.set(os.path.join(pdf_dir, pdf_name))
+            else:
+                self.pdf_target_preview.set("（请至少勾选一种任务：裁切或黑白二值化）")
+        else:
+            self.pdf_target_preview.set(os.path.join(pdf_dir, f"{pdf_name}{suffix}"))
+
+    def _update_pdf_hint(self, *args):
+        self._update_pdf_target_preview()
+        if hasattr(self, 'pdf_hint_label') and self.pdf_hint_label:
+            if self.pdf_no_convert.get():
+                if not self.enable_crop.get() and not self.enable_binarize.get():
+                    self.pdf_hint_label.config(
+                        text="提示: 仅提取 PDF 原始图片至同名目录，不进行后续处理与合并",
+                        foreground="#059669"
+                    )
+                else:
+                    self.pdf_hint_label.config(
+                        text="提示: 提取原图并完成处理后，不合并为 PDF，保留处理后的图片文件夹",
+                        foreground="#d97706"
+                    )
+            else:
+                self.pdf_hint_label.config(
+                    text="提示: 提取原图并完成处理后，将自动合并为新 PDF 并删除临时分页图片",
+                    foreground="#0284c7"
+                )
+
+    def _on_mode_changed(self):
+        if self.work_mode.get() == "pdf":
+            self.dir_frame.pack_forget()
+            self.pdf_frame.pack(fill=tk.X)
+            self._update_pdf_target_preview()
+        else:
+            self.pdf_frame.pack_forget()
+            self.dir_frame.pack(fill=tk.X)
+
+    def select_pdf_file_for_mode(self):
+        pdf_path = filedialog.askopenfilename(
+            title="选择要处理的 PDF 文件",
+            filetypes=[("PDF 文件", "*.pdf"), ("所有文件", "*.*")]
+        )
+        if pdf_path:
+            self.pdf_file_path.set(pdf_path)
+            self._update_pdf_target_preview()
+
     def select_dir(self, var):
         folder_selected = filedialog.askdirectory()
         if folder_selected:
@@ -250,6 +600,7 @@ class ImageProcessorApp:
         non_bin_state = tk.DISABLED if self.enable_binarize.get() else tk.NORMAL
         self.rb_keep_format.config(state=non_bin_state)
         self.rb_jpg80.config(state=non_bin_state)
+        self._update_pdf_hint()
 
     def toggle_threshold(self):
         if self.enable_binarize.get() and self.bin_method.get() == "1":
@@ -265,6 +616,7 @@ class ImageProcessorApp:
                     subchild.config(state=state)
             else:
                 child.config(state=state)
+        self._update_pdf_hint()
 
     def toggle_pause(self):
         if not self.is_processing: return
@@ -378,11 +730,14 @@ class ImageProcessorApp:
                 binary_array = (img_array > t_val).astype(np.uint8) * 255
                 final_img = Image.fromarray(binary_array).convert('1')
                 output_path = f"{out_path_base}.tif"
+                save_kwargs = {'compression': 'group4'}
+                if hasattr(pil_img, 'info') and 'dpi' in pil_img.info:
+                    save_kwargs['dpi'] = pil_img.info['dpi']
                 self._save_image_atomically(
                     final_img,
                     output_path,
                     'TIFF',
-                    compression='group4',
+                    **save_kwargs,
                 )
                 return output_path
             finally:
@@ -541,6 +896,7 @@ class ImageProcessorApp:
                 'source_dir': os.path.abspath(source_text) if source_text else '',
                 'target_dir': os.path.abspath(target_text) if target_text else '',
                 'include_subfolders': self.include_subfolders.get(),
+                'keep_images_after_pdf': self.keep_images_after_pdf.get(),
                 'enable_binarize': self.enable_binarize.get(),
                 'bin_method': self.bin_method.get(),
                 'threshold_val': self.threshold_val.get(),
@@ -591,8 +947,133 @@ class ImageProcessorApp:
     def start_processing(self):
         if self.is_processing: return
         if not self.enable_binarize.get() and not self.enable_crop.get():
-            messagebox.showwarning("操作无效", "请至少勾选一种处理任务！")
+            if not (self.work_mode.get() == "pdf" and self.pdf_no_convert.get()):
+                messagebox.showwarning("操作无效", "请至少勾选一种处理任务（裁切或黑白二值化）！")
+                return
+
+        if self.work_mode.get() == "pdf":
+            pdf_path = self.pdf_file_path.get().strip()
+            if not pdf_path or not os.path.isfile(pdf_path):
+                messagebox.showwarning("PDF 文件无效", "请先选择一个有效的待处理 PDF 文件。")
+                return
+
+            pdf_dir = os.path.dirname(pdf_path)
+            pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+            enable_crop = self.enable_crop.get()
+            enable_binarize = self.enable_binarize.get()
+            no_convert_pdf = self.pdf_no_convert.get()
+
+            if not enable_crop and not enable_binarize:
+                if not no_convert_pdf:
+                    messagebox.showwarning("操作无效", "请至少勾选一种处理任务（裁切或黑白二值化）！")
+                    return
+                task_dir = os.path.join(pdf_dir, pdf_name)
+                final_pdf_path = ''
+            else:
+                suffix = get_task_suffix(enable_crop, enable_binarize)
+                task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
+                final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
+
+            try:
+                threads = self.max_threads.get()
+            except tk.TclError:
+                threads = 8
+            if not 1 <= threads <= 64:
+                messagebox.showwarning("线程数无效", "最大线程数必须在 1 到 64 之间。")
+                return
+
+            try:
+                thresh = self.threshold_val.get()
+            except tk.TclError:
+                thresh = 50
+            if enable_binarize and not 0 <= thresh <= 100:
+                messagebox.showwarning("阈值无效", "自定义阈值必须在 0 到 100 之间。")
+                return
+
+            try:
+                c_pct = self.crop_percent.get()
+            except tk.TclError:
+                c_pct = 50
+            if enable_crop and not 1 <= c_pct <= 100:
+                messagebox.showwarning("分割比例无效", "分割比例必须在 1 到 100 之间。")
+                return
+
+            try:
+                ex_ratio = self.exclude_ratio.get()
+            except tk.TclError:
+                ex_ratio = 0.7
+            if enable_crop and not 0 < ex_ratio:
+                messagebox.showwarning("单页比例无效", "排除单页比例必须大于 0。")
+                return
+
+            settings = {
+                'pdf_path': os.path.abspath(pdf_path),
+                'source_dir': os.path.abspath(task_dir),
+                'target_dir': os.path.abspath(os.path.join(task_dir, 'output')),
+                'final_pdf_path': final_pdf_path,
+                'clean_dir': os.path.abspath(task_dir),
+                'include_subfolders': False,
+                'no_convert_pdf': no_convert_pdf,
+                'enable_binarize': enable_binarize,
+                'bin_method': self.bin_method.get(),
+                'threshold_val': thresh,
+                'non_bin_format': self.non_bin_format.get(),
+                'enable_crop': enable_crop,
+                'crop_percent': c_pct,
+                'crop_direction': self.crop_direction.get(),
+                'exclude_ratio': ex_ratio,
+                'max_threads': threads,
+                'enable_pdf': not no_convert_pdf,
+            }
+
+            if not enable_crop and not enable_binarize and no_convert_pdf:
+                confirm_msg = (
+                    f"将直接从 PDF 提取原始图片至同名目录（不进行裁切、色彩处理或转 PDF）：\n\n"
+                    f"PDF 文件：{pdf_path}\n"
+                    f"提取目录：{task_dir}\n\n"
+                    f"是否确认开始？"
+                )
+            elif no_convert_pdf:
+                confirm_msg = (
+                    f"将对 PDF 依次执行：\n"
+                    f"1. 从 PDF 提取原始分页图片\n"
+                    f"2. 按勾选任务批量处理\n"
+                    f"3. 保留处理后的图片文件夹（不生成 PDF）\n\n"
+                    f"PDF 文件：{pdf_path}\n"
+                    f"输出目录：{task_dir}\n\n"
+                    f"是否确认开始？"
+                )
+            else:
+                confirm_msg = (
+                    f"将对 PDF 依次执行：\n"
+                    f"1. 从 PDF 提取原始分页图片\n"
+                    f"2. 按勾选任务批量处理\n"
+                    f"3. 汇总生成新 PDF\n"
+                    f"4. 自动清理临时分页图片，仅保留新 PDF\n\n"
+                    f"PDF 文件：{pdf_path}\n"
+                    f"生成目录：{task_dir}\n\n"
+                    f"是否确认开始？"
+                )
+            if not messagebox.askyesno("开始 PDF 处理任务", confirm_msg, icon='question'):
+                return
+
+            self.is_processing = True
+            self.active_target_dir = settings['clean_dir']
+            self.is_paused.set(False)
+            self.cancel_event.clear()
+            self.pause_event.set()
+
+            self.start_btn.config(state=tk.DISABLED)
+            self.pause_btn.config(state=tk.NORMAL, text="暂停")
+            self.cancel_btn.config(state=tk.NORMAL)
+
+            self.progress_var.set(0)
+            self.status_label.config(text="正在读取并提取 PDF 原始分页图片...")
+
+            threading.Thread(target=self._run_pdf_pipeline_safely, args=(settings,), daemon=True).start()
+            self.root.after(50, self._poll_ui_events)
             return
+
         settings = self._get_validated_settings()
         if settings is None:
             return
@@ -614,6 +1095,197 @@ class ImageProcessorApp:
         # 后台线程只使用此处冻结的普通 Python 数据，不再读取 Tkinter 变量。
         threading.Thread(target=self._run_task_safely, args=(settings,), daemon=True).start()
         self.root.after(50, self._poll_ui_events)
+
+    def _run_pdf_pipeline_safely(self, settings):
+        """运行 PDF 模式流水线：提取 -> 预处理 -> 打包 PDF -> 清理分页图片。"""
+        try:
+            self._run_pdf_pipeline(settings)
+        except Exception as e:
+            self.ui_events.put(('finish', f"PDF 任务异常终止：{str(e)}"))
+
+    def _run_pdf_pipeline(self, settings):
+        pdf_path = settings['pdf_path']
+        raw_dir = settings['source_dir']
+        out_dir = settings['target_dir']
+        final_pdf = settings['final_pdf_path']
+
+        # 阶段 1：提取原图
+        self.ui_events.put(('status', '正在读取并提取 PDF 原始分页图片...'))
+        def _extract_progress(cur, total, msg):
+            self.ui_events.put(('progress', (cur / total) * 100, msg))
+
+        extracted_count, err = extract_images_from_pdf(
+            pdf_path, raw_dir, progress_callback=_extract_progress, cancel_event=self.cancel_event
+        )
+        if self.cancel_event.is_set():
+            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'])))
+            return
+        if err:
+            self.ui_events.put(('finish', f"PDF 提取失败：{err}"))
+            return
+
+        # 如果勾选不转换为 PDF，且未选择色彩处理和处理分页：直接提取完成即可
+        if not settings.get('enable_crop', False) and not settings.get('enable_binarize', False) and (settings.get('no_convert_pdf', False) or not settings.get('enable_pdf', True)):
+            summary_msg = (
+                f"PDF 原始图片提取完成！\n"
+                f"- 提取目录: {raw_dir}\n"
+                f"- 共提取原始图片: {extracted_count} 张\n"
+                f"- 未执行裁切、色彩处理或合并 PDF。"
+            )
+            self.ui_events.put(('finish', summary_msg))
+            return
+
+        # 阶段 2：预处理扫描与执行
+        valid_exts = {'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2'}
+        tasks = []
+        if os.path.exists(raw_dir):
+            for file in os.listdir(raw_dir):
+                full_path = os.path.join(raw_dir, file)
+                if os.path.isfile(full_path) and os.path.splitext(file)[1].lower() in valid_exts:
+                    tasks.append((full_path, file, file))
+
+        total_files = len(tasks)
+        if total_files == 0:
+            self.ui_events.put(('finish', "未从 PDF 中提取到可处理的图片文件！"))
+            return
+
+        tasks, collision_groups = self._assign_output_stems(tasks)
+        processed = 0
+        succeeded = 0
+        errors = []
+        with concurrent.futures.ThreadPoolExecutor(max_workers=settings['max_threads']) as executor:
+            future_to_file = {
+                executor.submit(
+                    self.process_single_image,
+                    task[0], task[1], task[2], task[3], settings,
+                ): task
+                for task in tasks
+            }
+
+            for future in concurrent.futures.as_completed(future_to_file):
+                task = future_to_file[future]
+                try:
+                    result = future.result()
+                except Exception as e:
+                    result = self._result(False, f"错误 {task[2]}: {str(e)}", str(e))
+                processed += 1
+                if result['ok']:
+                    succeeded += 1
+                elif not self.cancel_event.is_set():
+                    errors.append(f"{task[1]}：{result['error'] or result['message']}")
+                self.ui_events.put((
+                    'progress',
+                    (processed / total_files) * 100,
+                    result['message'],
+                ))
+
+        if self.cancel_event.is_set():
+            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'])))
+            return
+
+        # 检查是否不转换为 PDF
+        if settings.get('no_convert_pdf', False) or not settings.get('enable_pdf', True):
+            self.ui_events.put(('status', '正在整理处理后的图片...'))
+            try:
+                # 1. 清理 raw_dir 中的提取原图（保留 out_dir）
+                for fname in os.listdir(raw_dir):
+                    fpath = os.path.join(raw_dir, fname)
+                    if os.path.normcase(os.path.abspath(fpath)) == os.path.normcase(os.path.abspath(out_dir)):
+                        continue
+                    try:
+                        if os.path.isfile(fpath) or os.path.islink(fpath):
+                            os.remove(fpath)
+                        elif os.path.isdir(fpath):
+                            shutil.rmtree(fpath, ignore_errors=True)
+                    except OSError:
+                        pass
+
+                # 2. 将 out_dir 内的处理结果移动至 raw_dir
+                if os.path.isdir(out_dir):
+                    for fname in os.listdir(out_dir):
+                        src_item = os.path.join(out_dir, fname)
+                        dst_item = os.path.join(raw_dir, fname)
+                        if os.path.exists(dst_item):
+                            if os.path.isdir(dst_item):
+                                shutil.rmtree(dst_item, ignore_errors=True)
+                            else:
+                                os.remove(dst_item)
+                        shutil.move(src_item, dst_item)
+                    shutil.rmtree(out_dir, ignore_errors=True)
+            except Exception:
+                pass
+
+            summary_msg = (
+                f"PDF 处理完成（未合并为 PDF）！\n"
+                f"- 从 PDF 提取图片: {extracted_count} 张\n"
+                f"- 成功预处理: {succeeded} / {total_files} 项\n"
+                f"- 处理后的图片已保存在目录: {raw_dir}\n"
+                f"- 临时提取的原图已自动清理。"
+            )
+            if errors:
+                summary_msg += f"\n- 出现错误: {len(errors)} 个"
+            self.ui_events.put(('finish', summary_msg))
+            return
+
+        # 阶段 3：打包生成新 PDF
+        self.ui_events.put(('status', '正在打包生成新 PDF...'))
+        processed_images = []
+        for root, _, files in os.walk(out_dir):
+            for filename in files:
+                if os.path.splitext(filename)[1].lower() in valid_exts:
+                    processed_images.append(os.path.join(root, filename))
+
+        if not processed_images:
+            self.ui_events.put(('finish', "未找到可合并为 PDF 的处理结果图片。"))
+            return
+
+        processed_images.sort(
+            key=lambda path: self._natural_sort_key(os.path.relpath(path, out_dir))
+        )
+
+        pdf_success, pdf_res = self._build_single_pdf(
+            processed_images, final_pdf, settings,
+            progress_state=[0, len(processed_images)]
+        )
+
+        if self.cancel_event.is_set():
+            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'])))
+            return
+
+        if not pdf_success:
+            self.ui_events.put(('finish', f"生成新 PDF 失败：{pdf_res}"))
+            return
+
+        # 阶段 4：自动清理临时分页图片，仅保留生成的 PDF 文件
+        self.ui_events.put(('status', '正在清理临时分页图片...'))
+        try:
+            if os.path.isdir(out_dir):
+                shutil.rmtree(out_dir, ignore_errors=True)
+            for fname in os.listdir(raw_dir):
+                fpath = os.path.join(raw_dir, fname)
+                if os.path.normcase(os.path.abspath(fpath)) == os.path.normcase(os.path.abspath(final_pdf)):
+                    continue
+                try:
+                    if os.path.isfile(fpath) or os.path.islink(fpath):
+                        os.remove(fpath)
+                    elif os.path.isdir(fpath):
+                        shutil.rmtree(fpath, ignore_errors=True)
+                except OSError:
+                    pass
+        except Exception:
+            pass
+
+        summary_msg = (
+            f"PDF 处理完成！\n"
+            f"- 从 PDF 提取图片: {extracted_count} 张\n"
+            f"- 成功预处理: {succeeded} / {total_files} 项\n"
+            f"- 已生成新 PDF: {final_pdf}\n"
+            f"- 临时分页图片已自动清理，仅保留处理后的 PDF 文件。"
+        )
+        if errors:
+            summary_msg += f"\n- 出现错误: {len(errors)} 个"
+        self.ui_events.put(('finish', summary_msg))
+
 
     def _run_task_safely(self, settings):
         """确保扫描或调度异常也能恢复界面状态。"""
@@ -680,7 +1352,7 @@ class ImageProcessorApp:
         return assigned, collision_groups
 
     @staticmethod
-    def _completion_text(summary, pdf_count=None, pdf_error=None):
+    def _completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False):
         lines = [f"处理完成！成功处理 {summary['succeeded']} / {summary['total']} 个文件。"]
         if summary['collision_groups']:
             lines.append(
@@ -692,7 +1364,10 @@ class ImageProcessorApp:
             if len(summary['errors']) > 5:
                 lines.append(f"- 另有 {len(summary['errors']) - 5} 个文件未完成。")
         if pdf_count is not None:
-            lines.append(f"已生成 {pdf_count} 个 PDF。")
+            if keep_images:
+                lines.append(f"已生成 {pdf_count} 个 PDF，并保留了处理后的图片。")
+            else:
+                lines.append(f"已生成 {pdf_count} 个 PDF。已自动清理处理后的图片，仅保留 PDF 文件。")
         if pdf_error:
             lines.append(f"PDF 生成失败：{pdf_error}")
         return '\n'.join(lines)
@@ -760,54 +1435,193 @@ class ImageProcessorApp:
                 return False, result
             generated_pdfs.append(result)
 
+        # 检查是否保留处理后的图片（从图片目录开始处理时，默认不保留）
+        if not settings.get('keep_images_after_pdf', False):
+            self.ui_events.put(('status', '正在清理处理后的图片...'))
+            generated_pdf_set = {
+                os.path.normcase(os.path.abspath(p)) for p in generated_pdfs
+            }
+            # 删除所有被合并到 PDF 中的图片文件
+            for _, image_paths in groups:
+                for img_path in image_paths:
+                    abs_p = os.path.normcase(os.path.abspath(img_path))
+                    if abs_p not in generated_pdf_set and os.path.isfile(img_path):
+                        try:
+                            os.remove(img_path)
+                        except OSError:
+                            pass
+            # 自底向上清理 target_dir 内空出来的子文件夹
+            for root, dirs, files in os.walk(target_dir, topdown=False):
+                if os.path.normcase(os.path.abspath(root)) != os.path.normcase(os.path.abspath(target_dir)):
+                    try:
+                        if not os.listdir(root):
+                            os.rmdir(root)
+                    except OSError:
+                        pass
+
         return True, generated_pdfs
 
+    @classmethod
+    def _add_image_page_to_pdf_writer(cls, writer, image_path, default_res=300.0):
+        """将一张图片以最优且标准合规的流格式加入 PDF（1 位二值图使用 CCITT Group 4，彩色图使用 DCT/JPEG）。"""
+        with Image.open(image_path) as im:
+            w, h = im.size
+            dpi = im.info.get('dpi', (default_res, default_res))
+            if isinstance(dpi, (tuple, list)):
+                dpi_x = float(dpi[0] or default_res)
+                dpi_y = float(dpi[1] or default_res)
+            else:
+                dpi_x = dpi_y = float(dpi or default_res)
+            if dpi_x <= 0:
+                dpi_x = default_res
+            if dpi_y <= 0:
+                dpi_y = default_res
+
+            width_pt = w * 72.0 / dpi_x
+            height_pt = h * 72.0 / dpi_y
+
+            is_bilevel = (im.mode == '1') or (im.format == 'TIFF' and im.tag_v2.get(259) == 4)
+            if is_bilevel:
+                # 1 位黑白二值图：必须严格使用 1 位 TIFF Group 4 (Filter /CCITTFaxDecode) 封装
+                if im.mode != '1':
+                    im = im.convert('1')
+                is_single_strip_g4 = False
+                if im.format == 'TIFF' and im.tag_v2.get(259) == 4:
+                    offsets = im.tag_v2.get(273)
+                    counts = im.tag_v2.get(279)
+                    if offsets is not None and not isinstance(offsets, (list, tuple)):
+                        offsets = [offsets]
+                    if counts is not None and not isinstance(counts, (list, tuple)):
+                        counts = [counts]
+                    if offsets and counts and len(offsets) == 1:
+                        is_single_strip_g4 = True
+                        photometric = im.tag_v2.get(262, 1)
+                        with open(image_path, 'rb') as f:
+                            f.seek(int(offsets[0]))
+                            ccitt_data = f.read(int(counts[0]))
+
+                if not is_single_strip_g4:
+                    bio = io.BytesIO()
+                    im.save(bio, format='TIFF', compression='group4')
+                    bio.seek(0)
+                    with Image.open(bio) as t:
+                        offsets = t.tag_v2[273]
+                        counts = t.tag_v2[279]
+                        photometric = t.tag_v2.get(262, 1)
+                        off = offsets[0] if isinstance(offsets, (list, tuple)) else offsets
+                        cnt = counts[0] if isinstance(counts, (list, tuple)) else counts
+                        bio.seek(int(off))
+                        ccitt_data = bio.read(int(cnt))
+
+                img_obj = DecodedStreamObject()
+                img_obj.set_data(ccitt_data)
+                img_obj.update({
+                    NameObject('/Type'): NameObject('/XObject'),
+                    NameObject('/Subtype'): NameObject('/Image'),
+                    NameObject('/Width'): NumberObject(w),
+                    NameObject('/Height'): NumberObject(h),
+                    NameObject('/ColorSpace'): NameObject('/DeviceGray'),
+                    NameObject('/BitsPerComponent'): NumberObject(1),
+                    NameObject('/Filter'): NameObject('/CCITTFaxDecode'),
+                    NameObject('/DecodeParms'): DictionaryObject({
+                        NameObject('/K'): NumberObject(-1),
+                        NameObject('/Columns'): NumberObject(w),
+                        NameObject('/Rows'): NumberObject(h),
+                        NameObject('/BlackIs1'): BooleanObject(True if photometric != 0 else False),
+                    }),
+                })
+            else:
+                # 彩色或灰度图：使用 /DCTDecode (JPEG) 编码
+                ext = os.path.splitext(image_path)[1].lower()
+                if ext in ('.jpg', '.jpeg') and im.mode in ('RGB', 'L'):
+                    with open(image_path, 'rb') as f:
+                        jpg_data = f.read()
+                    cs = '/DeviceRGB' if im.mode == 'RGB' else '/DeviceGray'
+                else:
+                    bio = io.BytesIO()
+                    conv = im.convert('RGB') if im.mode not in ('RGB', 'L') else im
+                    cs = '/DeviceRGB' if conv.mode == 'RGB' else '/DeviceGray'
+                    conv.save(bio, format='JPEG', quality=85)
+                    jpg_data = bio.getvalue()
+
+                img_obj = DecodedStreamObject()
+                img_obj.set_data(jpg_data)
+                img_obj.update({
+                    NameObject('/Type'): NameObject('/XObject'),
+                    NameObject('/Subtype'): NameObject('/Image'),
+                    NameObject('/Width'): NumberObject(w),
+                    NameObject('/Height'): NumberObject(h),
+                    NameObject('/ColorSpace'): NameObject(cs),
+                    NameObject('/BitsPerComponent'): NumberObject(8),
+                    NameObject('/Filter'): NameObject('/DCTDecode'),
+                })
+
+            content_str = f'q {width_pt:.4f} 0 0 {height_pt:.4f} 0 0 cm /Im0 Do Q'
+            content_obj = DecodedStreamObject()
+            content_obj.set_data(content_str.encode('ascii'))
+
+            content_ref = writer._add_object(content_obj)
+            img_ref = writer._add_object(img_obj)
+
+            page = writer.add_blank_page(width=width_pt, height=height_pt)
+            page[NameObject('/Contents')] = content_ref
+            page[NameObject('/Resources')] = DictionaryObject({
+                NameObject('/XObject'): DictionaryObject({
+                    NameObject('/Im0'): img_ref
+                })
+            })
+
     def _build_single_pdf(self, image_paths, pdf_path, settings, progress_state=None):
-        """将同一个输出目录内的图片写入一个 PDF。"""
-        pages = []
+        """将同一个输出目录内的图片写入一个 PDF（1 位二值图严格使用 CCITT Group 4 封装）。"""
+        temporary_path = f"{pdf_path}.tmp"
         try:
+            writer = PdfWriter()
+            writer.add_metadata({
+                '/Creator': self.PDF_APPLICATION_NAME,
+                '/Producer': self.PDF_APPLICATION_NAME,
+            })
+
+            total = max(1, progress_state[1]) if progress_state is not None else len(image_paths)
             for image_path in image_paths:
                 if self.cancel_event.is_set():
                     return False, "PDF 生成已取消。"
-                with Image.open(image_path) as image:
-                    # 保留 1 位黑白页。Pillow 会将其编码为 CCITT Group 4，
-                    # 避免原先转换 RGB 后使二值 TIFF 的体积急剧膨胀。
-                    if image.mode in ('1', 'L', 'RGB', 'CMYK'):
-                        pages.append(image.copy())
-                    else:
-                        # 带透明通道或调色板的图片仍转为 RGB，保证 PDF 兼容性。
-                        pages.append(image.convert('RGB'))
+                self._add_image_page_to_pdf_writer(writer, image_path, default_res=300.0)
                 if progress_state is not None:
                     progress_state[0] += 1
-                    total = max(1, progress_state[1])
                     self.ui_events.put((
                         'progress',
                         progress_state[0] * 100.0 / total,
                         f'正在打包 PDF：{progress_state[0]} / {total}',
                     ))
 
-            first_page, *remaining_pages = pages
-            first_page.save(
-                pdf_path,
-                format='PDF',
-                save_all=True,
-                append_images=remaining_pages,
-                resolution=300.0,
-                creator=self.PDF_APPLICATION_NAME,
-                producer=self.PDF_APPLICATION_NAME,
-            )
-            self._set_pdf_open_to_fit_page(pdf_path)
+            if not writer.pages:
+                return False, "没有可写入 PDF 的有效页面。"
+
+            first_ref = writer.pages[0].indirect_reference
+            if first_ref is not None:
+                writer._root_object[NameObject('/OpenAction')] = ArrayObject([
+                    first_ref,
+                    NameObject('/Fit'),
+                ])
+                writer._root_object[NameObject('/PageLayout')] = NameObject('/SinglePage')
+
+            with open(temporary_path, 'wb') as output_file:
+                writer.write(output_file)
+
+            os.replace(temporary_path, pdf_path)
             return True, pdf_path
         except Exception as e:
+            if os.path.exists(temporary_path):
+                try:
+                    os.remove(temporary_path)
+                except OSError:
+                    pass
             if os.path.exists(pdf_path):
                 try:
                     os.remove(pdf_path)
                 except OSError:
                     pass
             return False, str(e)
-        finally:
-            for page in pages:
-                page.close()
 
     @staticmethod
     def _set_pdf_open_to_fit_page(pdf_path):
@@ -858,7 +1672,11 @@ class ImageProcessorApp:
         elif success:
             self.ui_events.put((
                 'finish',
-                self._completion_text(summary, pdf_count=len(result)),
+                self._completion_text(
+                    summary,
+                    pdf_count=len(result),
+                    keep_images=settings.get('keep_images_after_pdf', False),
+                ),
             ))
         else:
             self.ui_events.put((
@@ -980,11 +1798,37 @@ class ImageProcessorApp:
             elif event[0] == 'ask_pdf':
                 self._prompt_pdf_generation(event[1], event[2])
                 return
+            elif event[0] == 'pdf_extracted':
+                self._handle_pdf_extracted(*event[1:])
+                return
             else:
                 self._finish_processing(event[1])
                 return
         if self.is_processing:
             self.root.after(50, self._poll_ui_events)
+
+    def _handle_pdf_extracted(self, pdf_path, extract_dir, count, err):
+        self.is_processing = False
+        self.start_btn.config(state=tk.NORMAL)
+        self.pause_btn.config(state=tk.DISABLED, text="暂停")
+        self.cancel_btn.config(state=tk.DISABLED)
+
+        if err:
+            self.status_label.config(text=f"PDF 提取失败: {err}")
+            messagebox.showerror("提取失败", f"未能成功提取 PDF 图片：\n{err}")
+            return
+
+        self.progress_var.set(100)
+        self.status_label.config(text=f"PDF 图片提取完成，共提取 {count} 张图片。")
+        self.source_dir.set(extract_dir)
+        self.target_dir.set(os.path.join(extract_dir, "output"))
+
+        ask_msg = (
+            f"已成功从 PDF 提取 {count} 张图片到文件夹：\n{extract_dir}\n\n"
+            "是否立即将该文件夹执行后续裁切、黑白二值化和 PDF 汇总的处理？"
+        )
+        if messagebox.askyesno("执行后续预处理", ask_msg, icon='question'):
+            self.start_processing()
 
     def _update_progress(self, percent, msg):
         self.progress_var.set(percent)
@@ -1046,15 +1890,15 @@ class WebImageProcessorService(ImageProcessorApp):
         try:
             request = urllib.request.Request(
                 self.UPDATE_INFO_URL,
-                headers={'User-Agent': 'SHUGE-C2BW/3.1'},
+                headers={'User-Agent': 'SHUGE-C2BW/3.2'},
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 data = json.loads(response.read().decode('utf-8-sig'))
             if not isinstance(data, dict) or not data.get('version'):
                 raise ValueError('服务器返回的更新信息格式无效。')
-            return {'ok': True, 'current_version': '3.1.0.0', 'update': data, 'source': 'server'}
+            return {'ok': True, 'current_version': '3.2.0.0', 'update': data, 'source': 'server'}
         except Exception:
-            return {'ok': False, 'current_version': '3.1.0.0'}
+            return {'ok': False, 'current_version': '3.2.0.0'}
 
     def open_download_url(self, url):
         try:
@@ -1080,6 +1924,95 @@ class WebImageProcessorService(ImageProcessorApp):
         except Exception as e:
             return {'ok': False, 'error': f'无法打开目录选择器：{str(e)}'}
 
+    def choose_pdf_file(self, initial_directory=''):
+        """弹出文件选择器选择 PDF 文件，返回其路径和建议提取目录。"""
+        if self.window is None:
+            return {'ok': False, 'error': '窗口尚未初始化。'}
+        with self.state_lock:
+            if self.is_processing:
+                return {'ok': False, 'error': '当前已有任务正在运行。'}
+
+        try:
+            selected = self.window.create_file_dialog(
+                webview.OPEN_DIALOG,
+                directory=initial_directory or '',
+                allow_multiple=False,
+                file_types=('PDF 文件 (*.pdf)', '所有文件 (*.*)')
+            )
+        except Exception as e:
+            return {'ok': False, 'error': f'无法打开文件选择器：{str(e)}'}
+
+        if not selected or not selected[0]:
+            return {'ok': True, 'cancelled': True}
+
+        pdf_path = selected[0]
+        if not os.path.isfile(pdf_path) or not pdf_path.lower().endswith('.pdf'):
+            return {'ok': False, 'error': '所选文件不是有效的 PDF 文件。'}
+
+        pdf_dir = os.path.dirname(pdf_path)
+        pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+        extract_dir = os.path.join(pdf_dir, pdf_name)
+        dir_exists_nonempty = bool(
+            os.path.exists(extract_dir)
+            and os.path.isdir(extract_dir)
+            and os.listdir(extract_dir)
+        )
+
+        return {
+            'ok': True,
+            'pdf_path': pdf_path,
+            'extract_dir': extract_dir,
+            'dir_exists_nonempty': dir_exists_nonempty,
+        }
+
+    def start_pdf_extraction(self, pdf_path, extract_dir):
+        """确认后在后台启动 PDF 分页图片提取。"""
+        with self.state_lock:
+            if self.is_processing:
+                return {'ok': False, 'error': '当前已有任务正在运行。'}
+            if not pdf_path or not os.path.isfile(pdf_path):
+                return {'ok': False, 'error': '无效的 PDF 文件路径。'}
+            if not extract_dir:
+                return {'ok': False, 'error': '无效的目标提取目录。'}
+
+            while True:
+                try:
+                    self.ui_events.get_nowait()
+                except queue.Empty:
+                    break
+
+            self.is_processing = True
+            self.is_paused = False
+            self.phase = 'extracting_pdf'
+            self.active_target_dir = None
+            self.last_output_dir = None
+            self.pending_pdf = None
+            self.cancel_event.clear()
+            self.pause_event.set()
+
+        def _do_extract():
+            def _progress(cur, total, msg):
+                self.ui_events.put(('progress', (cur / total) * 100, msg))
+
+            self.ui_events.put(('status', '正在读取并提取 PDF 原始分页图片...'))
+            count, err = extract_images_from_pdf(
+                pdf_path, extract_dir, progress_callback=_progress, cancel_event=self.cancel_event
+            )
+            with self.state_lock:
+                self.is_processing = False
+                self.phase = 'idle'
+            self.ui_events.put(('pdf_extracted', pdf_path, extract_dir, count, err))
+
+        threading.Thread(target=_do_extract, daemon=True).start()
+        return {'ok': True, 'pdf_path': pdf_path, 'extract_dir': extract_dir}
+
+    def choose_pdf_and_extract(self, initial_directory=''):
+        """兼容旧接口：选择 PDF 并直接开始提取。"""
+        res = self.choose_pdf_file(initial_directory)
+        if not res.get('ok') or res.get('cancelled'):
+            return res
+        return self.start_pdf_extraction(res['pdf_path'], res['extract_dir'])
+
     def _validated_web_settings(self, raw_settings):
         try:
             raw_settings = raw_settings or {}
@@ -1089,6 +2022,7 @@ class WebImageProcessorService(ImageProcessorApp):
                 'source_dir': os.path.abspath(source_text) if source_text else '',
                 'target_dir': os.path.abspath(target_text) if target_text else '',
                 'include_subfolders': bool(raw_settings.get('include_subfolders', False)),
+                'keep_images_after_pdf': bool(raw_settings.get('keep_images_after_pdf', False)),
                 'enable_binarize': bool(raw_settings.get('enable_binarize', True)),
                 'bin_method': str(raw_settings.get('bin_method', '0')),
                 'threshold_val': int(raw_settings.get('threshold_val', 50)),
@@ -1132,6 +2066,100 @@ class WebImageProcessorService(ImageProcessorApp):
         if settings['enable_crop'] and settings['exclude_ratio'] <= 0:
             return None, '排除单页比例必须大于 0。'
         return settings, None
+
+    def _validated_pdf_settings(self, raw_settings):
+        try:
+            raw_settings = raw_settings or {}
+            pdf_path = str(raw_settings.get('pdf_path', '')).strip()
+            if not pdf_path or not os.path.isfile(pdf_path) or not pdf_path.lower().endswith('.pdf'):
+                return None, '请先选择有效的待处理 PDF 文件。'
+
+            enable_crop = bool(raw_settings.get('enable_crop', True))
+            enable_binarize = bool(raw_settings.get('enable_binarize', True))
+            no_convert_pdf = bool(raw_settings.get('no_convert_pdf', False))
+
+            if not enable_crop and not enable_binarize:
+                if not no_convert_pdf:
+                    return None, '请至少启用一种处理任务（裁切或黑白二值化）。'
+
+            pdf_dir = os.path.dirname(pdf_path)
+            pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+            if not enable_crop and not enable_binarize and no_convert_pdf:
+                task_dir = os.path.join(pdf_dir, pdf_name)
+                final_pdf_path = ''
+            else:
+                suffix = get_task_suffix(enable_crop, enable_binarize)
+                task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
+                final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
+
+            settings = {
+                'pdf_path': os.path.abspath(pdf_path),
+                'source_dir': os.path.abspath(task_dir),
+                'target_dir': os.path.abspath(os.path.join(task_dir, 'output')),
+                'final_pdf_path': final_pdf_path,
+                'clean_dir': os.path.abspath(task_dir),
+                'include_subfolders': False,
+                'no_convert_pdf': no_convert_pdf,
+                'enable_binarize': enable_binarize,
+                'bin_method': str(raw_settings.get('bin_method', '0')),
+                'threshold_val': int(raw_settings.get('threshold_val', 50)),
+                'non_bin_format': str(raw_settings.get('non_bin_format', 'keep')),
+                'enable_crop': enable_crop,
+                'crop_percent': int(raw_settings.get('crop_percent', 50)),
+                'crop_direction': str(raw_settings.get('crop_direction', 'R2L')),
+                'exclude_ratio': float(raw_settings.get('exclude_ratio', 0.7)),
+                'max_threads': int(raw_settings.get('max_threads', 8)),
+                'enable_pdf': not no_convert_pdf,
+            }
+        except (TypeError, ValueError, OverflowError):
+            return None, '请使用有效的数字填写线程数、阈值和裁切参数。'
+
+        if settings['bin_method'] not in ('0', '1'):
+            return None, '二值化方式无效。'
+        if settings['non_bin_format'] not in ('keep', 'jpg80'):
+            return None, '非二值化输出格式无效。'
+        if settings['crop_direction'] not in ('R2L', 'L2R'):
+            return None, '阅读顺序无效。'
+        if not 1 <= settings['max_threads'] <= 64:
+            return None, '最大线程数必须在 1 到 64 之间。'
+        if settings['enable_binarize'] and not 0 <= settings['threshold_val'] <= 100:
+            return None, '自定义阈值必须在 0 到 100 之间。'
+        if settings['enable_crop'] and not 1 <= settings['crop_percent'] <= 100:
+            return None, '分割比例必须在 1 到 100 之间。'
+        if settings['enable_crop'] and settings['exclude_ratio'] <= 0:
+            return None, '排除单页比例必须大于 0。'
+        return settings, None
+
+    def start_pdf_workflow(self, raw_settings):
+        with self.state_lock:
+            if self.is_processing:
+                return {'ok': False, 'error': '当前已有任务正在运行。'}
+
+            settings, error = self._validated_pdf_settings(raw_settings)
+            if error:
+                return {'ok': False, 'error': error}
+
+            while True:
+                try:
+                    self.ui_events.get_nowait()
+                except queue.Empty:
+                    break
+
+            self.is_processing = True
+            self.is_paused = False
+            self.phase = 'extracting_pdf'
+            self.active_target_dir = settings['clean_dir']
+            self.last_output_dir = settings['clean_dir']
+            self.pending_pdf = None
+            self.cancel_event.clear()
+            self.pause_event.set()
+
+        threading.Thread(
+            target=self._run_pdf_pipeline_safely,
+            args=(settings,),
+            daemon=True,
+        ).start()
+        return {'ok': True, 'target_dir': settings['clean_dir']}
 
     def start_processing(self, raw_settings):
         with self.state_lock:
@@ -1249,6 +2277,14 @@ class WebImageProcessorService(ImageProcessorApp):
                     'type': 'ask_pdf',
                     'include_subfolders': event[1]['include_subfolders'],
                 })
+            elif event_type == 'pdf_extracted':
+                frontend_events.append({
+                    'type': 'pdf_extracted',
+                    'pdf_path': event[1],
+                    'extract_dir': event[2],
+                    'count': event[3],
+                    'error': event[4],
+                })
             elif event_type == 'finish':
                 with self.state_lock:
                     self.is_processing = False
@@ -1294,6 +2330,15 @@ class WebImageProcessorBridge:
     def choose_directory(self, initial_directory=''):
         return self.service.choose_directory(initial_directory)
 
+    def choose_pdf_file(self, initial_directory=''):
+        return self.service.choose_pdf_file(initial_directory)
+
+    def start_pdf_extraction(self, pdf_path, extract_dir):
+        return self.service.start_pdf_extraction(pdf_path, extract_dir)
+
+    def choose_pdf_and_extract(self, initial_directory=''):
+        return self.service.choose_pdf_and_extract(initial_directory)
+
     def get_update_info(self):
         return self.service.get_update_info()
 
@@ -1302,6 +2347,9 @@ class WebImageProcessorBridge:
 
     def start_processing(self, raw_settings):
         return self.service.start_processing(raw_settings)
+
+    def start_pdf_workflow(self, raw_settings):
+        return self.service.start_pdf_workflow(raw_settings)
 
     def toggle_pause(self):
         return self.service.toggle_pause()
@@ -1329,7 +2377,7 @@ def launch_web_ui():
     bridge = WebImageProcessorBridge(service)
     index_path = _resource_path('webui', 'index.html')
     window = webview.create_window(
-        '智能图像预处理工具 v3.1',
+        '智能图像预处理工具 v3.2',
         url=index_path,
         # 同时使用显式 expose，避免部分 Win7/MSHTML 环境在反射继承类时
         # 生成空的 API 列表。
@@ -1345,9 +2393,13 @@ def launch_web_ui():
     service.bind_window(window)
     window.expose(
         bridge.choose_directory,
+        bridge.choose_pdf_file,
+        bridge.start_pdf_extraction,
+        bridge.choose_pdf_and_extract,
         bridge.get_update_info,
         bridge.open_download_url,
         bridge.start_processing,
+        bridge.start_pdf_workflow,
         bridge.toggle_pause,
         bridge.cancel_processing,
         bridge.respond_pdf_prompt,
@@ -1367,5 +2419,31 @@ def launch_web_ui():
     )
 
 
+def launch_tkinter_ui():
+    root = tk.Tk()
+    app = ImageProcessorApp(root)
+    root.mainloop()
+
+
 if __name__ == "__main__":
-    launch_web_ui()
+    if '--tk' in sys.argv or '--classic' in sys.argv:
+        launch_tkinter_ui()
+    else:
+        try:
+            launch_web_ui()
+        except Exception as e:
+            try:
+                launch_tkinter_ui()
+            except Exception:
+                import traceback
+                err_str = traceback.format_exc()
+                try:
+                    with open(os.path.join(tempfile.gettempdir(), "c2bw_startup_error.log"), "w", encoding="utf-8") as lf:
+                        lf.write(err_str)
+                except Exception:
+                    pass
+                try:
+                    import tkinter.messagebox as mb
+                    mb.showerror("启动异常", f"程序启动发生错误：\n{str(e)}\n\n详情已记录。")
+                except Exception:
+                    pass
