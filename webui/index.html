@@ -16,7 +16,7 @@
         <h1>智能图像预处理工具</h1>
         <p>批量裁切、黑白二值化与 PDF 汇总</p>
       </div>
-      <el-tag class="version-tag" size="small" effect="plain">v3.2</el-tag>
+      <el-tag class="version-tag" size="small" effect="plain">v3.3</el-tag>
       <el-popover v-if="updateAvailable" placement="bottom-end" width="300" trigger="hover">
         <div class="update-popover">
           <div class="update-title">发现新版本 {{ updateInfo.version }}</div>
@@ -46,6 +46,9 @@
             <i class="el-icon-document"></i> 从PDF文件开始处理
           </el-radio-button>
         </el-radio-group>
+        <span class="mode-tip-tag" v-if="workMode === 'pdf'">
+          <i class="el-icon-warning-outline"></i> 仅支持图片类型的PDF文件处理
+        </span>
       </div>
 
       <el-card class="section-card source-card" shadow="never">
@@ -132,6 +135,11 @@
             <span v-else-if="pdfForm.no_convert_pdf">将从 PDF 提取原始图片至该同名目录并执行选定任务，保留处理后的图片文件夹，不合并为 PDF。</span>
             <span v-else>将从 PDF 提取原始图片至该同名目录，执行选定任务并打包为新 PDF 后，自动删除临时分页图片，仅保留处理后的 PDF 文件。</span>
           </div>
+
+          <div class="directory-option pdf-warning-hint">
+            <i class="el-icon-warning"></i>
+            <span>提示：仅支持图片类型的 PDF 文件处理（扫描古籍、漫画、图片转存的 PDF）。</span>
+          </div>
         </template>
       </el-card>
 
@@ -213,7 +221,117 @@
                 <el-radio label="L2R">从左到右</el-radio>
               </el-radio-group>
             </div>
-            <p class="setting-tip">宽高比低于排除值的图片按单页输出。</p>
+
+            <!-- 动态线框视觉展示区 -->
+            <div class="wireframe-visual-panel">
+              <!-- 1. 排除单页比例线框 -->
+              <div class="wireframe-item">
+                <div class="wireframe-header">
+                  <span class="wireframe-title">单页判定线框</span>
+                  <span class="wireframe-badge">宽/高 &lt; {{ form.exclude_ratio }}</span>
+                </div>
+                <div class="wireframe-stage">
+                  <div
+                    class="wireframe-single-box"
+                    :style="{ width: singleBoxWidth + 'px' }"
+                    :title="'宽高比阈值: ' + form.exclude_ratio + ' (小于此比例不裁切)'">
+                    <div class="wireframe-box-inner">
+                      <i class="el-icon-document"></i>
+                      <span>单页原图</span>
+                    </div>
+                  </div>
+                </div>
+                <div class="wireframe-caption">
+                  宽高比 &lt; {{ form.exclude_ratio }} 视为单页，跳过裁切
+                </div>
+              </div>
+
+              <!-- 2. 双页分割比例与阅读顺序线框 -->
+              <div class="wireframe-item">
+                <div class="wireframe-header">
+                  <span class="wireframe-title">双页裁切线框</span>
+                  <span class="wireframe-badge">左右各宽 {{ form.crop_percent }}%</span>
+                </div>
+                <div class="wireframe-stage">
+                  <div class="wireframe-spread-box" :title="spreadBoxTooltip">
+                    <!-- 当 P >= 50 时展示：左独占区 + 中缝重叠区 + 右独占区 -->
+                    <template v-if="cropPercentNum >= 50">
+                      <!-- 左半页独占部分 -->
+                      <div
+                        class="wireframe-page wireframe-page-left"
+                        :style="{ width: (100 - cropPercentNum) + '%' }"
+                        :class="{ 'is-page-a': form.crop_direction === 'L2R' }">
+                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? '② _B' : '① _A' }}</span>
+                        <span class="page-pct">{{ 100 - cropPercentNum }}%</span>
+                      </div>
+
+                      <!-- 动态裁切线1 (右页左边界) -->
+                      <div v-if="overlapPercent > 0" class="wireframe-cut-line" :style="{ left: (100 - cropPercentNum) + '%' }">
+                        <span class="scissor-icon"><i class="el-icon-scissors"></i></span>
+                      </div>
+
+                      <!-- 中缝重叠区 (两页均包含) -->
+                      <div
+                        v-if="overlapPercent > 0"
+                        class="wireframe-page wireframe-page-overlap"
+                        :style="{ width: overlapPercent + '%' }">
+                        <span class="overlap-tag">中缝重叠</span>
+                        <span class="overlap-pct">{{ overlapPercent }}%</span>
+                      </div>
+
+                      <!-- 动态裁切线2 (左页右边界/单一切线) -->
+                      <div class="wireframe-cut-line" :style="{ left: cropPercentNum + '%' }">
+                        <span class="scissor-icon"><i class="el-icon-scissors"></i></span>
+                      </div>
+
+                      <!-- 右半页独占部分 -->
+                      <div
+                        class="wireframe-page wireframe-page-right"
+                        :style="{ width: (100 - cropPercentNum) + '%' }"
+                        :class="{ 'is-page-a': form.crop_direction === 'R2L' }">
+                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? '① _A' : '② _B' }}</span>
+                        <span class="page-pct">{{ 100 - cropPercentNum }}%</span>
+                      </div>
+                    </template>
+
+                    <!-- 当 P < 50 时展示：左页 + 未裁区 + 右页 -->
+                    <template v-else>
+                      <div
+                        class="wireframe-page wireframe-page-left"
+                        :style="{ width: cropPercentNum + '%' }"
+                        :class="{ 'is-page-a': form.crop_direction === 'L2R' }">
+                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? '② _B' : '① _A' }}</span>
+                        <span class="page-pct">{{ cropPercentNum }}%</span>
+                      </div>
+
+                      <div class="wireframe-cut-line" :style="{ left: cropPercentNum + '%' }">
+                        <span class="scissor-icon"><i class="el-icon-scissors"></i></span>
+                      </div>
+
+                      <div class="wireframe-page wireframe-page-gap" :style="{ width: gapPercent + '%' }">
+                        <span class="gap-tag">未裁入区</span>
+                        <span class="gap-pct">{{ gapPercent }}%</span>
+                      </div>
+
+                      <div class="wireframe-cut-line" :style="{ left: (100 - cropPercentNum) + '%' }">
+                        <span class="scissor-icon"><i class="el-icon-scissors"></i></span>
+                      </div>
+
+                      <div
+                        class="wireframe-page wireframe-page-right"
+                        :style="{ width: cropPercentNum + '%' }"
+                        :class="{ 'is-page-a': form.crop_direction === 'R2L' }">
+                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? '① _A' : '② _B' }}</span>
+                        <span class="page-pct">{{ cropPercentNum }}%</span>
+                      </div>
+                    </template>
+                  </div>
+                </div>
+                <div class="wireframe-caption">
+                  {{ spreadCaptionText }}
+                </div>
+              </div>
+            </div>
           </div>
 
           <div v-else class="disabled-panel">

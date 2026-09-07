@@ -21,12 +21,12 @@ if %BUILD_ERR% neq 0 (
     exit /b 1
 )
 
-copy /y "dist\智能图像预处理工具 v3.2_Win7.exe" "dist\c2bw_win7.exe" >nul 2>&1
-copy /y "dist\智能图像预处理工具 v3.2_Win7.exe" "dist\c2bw_v3.2_win7.exe" >nul 2>&1
+copy /y "dist\智能图像预处理工具 v3.3_Win7.exe" "dist\c2bw_win7.exe" >nul 2>&1
+copy /y "dist\智能图像预处理工具 v3.3_Win7.exe" "dist\c2bw_v3.3_win7.exe" >nul 2>&1
 
 echo.
 echo Windows 7 兼容构建完成：
-echo - dist\智能图像预处理工具 v3.2_Win7.exe
+echo - dist\智能图像预处理工具 v3.3_Win7.exe
 echo - dist\c2bw_win7.exe
-echo - dist\c2bw_v3.2_win7.exe
+echo - dist\c2bw_v3.3_win7.exe
 pause

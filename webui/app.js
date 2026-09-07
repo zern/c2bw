@@ -80,6 +80,47 @@
           finishing: '正在完成任务'
         };
         return names[this.phase] || '任务进度';
+      },
+      singleBoxWidth: function () {
+        var ratio = parseFloat(this.form.exclude_ratio);
+        if (isNaN(ratio) || ratio <= 0) {
+          ratio = 0.7;
+        }
+        return Math.min(84, Math.max(16, Math.round(48 * ratio)));
+      },
+      cropPercentNum: function () {
+        var pct = parseInt(this.form.crop_percent, 10);
+        if (isNaN(pct) || pct < 1 || pct > 100) {
+          pct = 50;
+        }
+        return pct;
+      },
+      overlapPercent: function () {
+        return Math.max(0, 2 * this.cropPercentNum - 100);
+      },
+      gapPercent: function () {
+        return Math.max(0, 100 - 2 * this.cropPercentNum);
+      },
+      spreadCaptionText: function () {
+        var p = this.cropPercentNum;
+        var pageA = this.form.crop_direction === 'R2L' ? '右页为第1页(_A)' : '左页为第1页(_A)';
+        if (p > 50) {
+          return '左右各裁切 ' + p + '%，中缝重叠 ' + this.overlapPercent + '%（保证中缝内容可阅读）· ' + pageA;
+        } else if (p === 50) {
+          return '左右各裁切 50%，居中均分裁切无重叠 · ' + pageA;
+        } else {
+          return '左右各裁切 ' + p + '%，中间未裁入 ' + this.gapPercent + '% · ' + pageA;
+        }
+      },
+      spreadBoxTooltip: function () {
+        var p = this.cropPercentNum;
+        if (p > 50) {
+          return '左右各占原图 ' + p + '% 宽度，中间 ' + this.overlapPercent + '% 为重复重叠区，确保中缝装订内容完整';
+        } else if (p === 50) {
+          return '左右各占 50% 宽度，居中均分裁切';
+        } else {
+          return '左右各占 ' + p + '% 宽度，中间 ' + this.gapPercent + '% 未裁入';
+        }
       }
     },
     mounted: function () {

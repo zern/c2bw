@@ -381,8 +381,23 @@ body {
 
 .mode-switch-wrapper {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
   margin-bottom: 16px;
+}
+
+.mode-tip-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #d97706;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 12px;
+  padding: 3px 12px;
+  line-height: 1.4;
 }
 
 .mode-radio-group .el-radio-button__inner {
@@ -406,3 +421,249 @@ body {
   margin-right: 4px;
   font-size: 14px;
 }
+
+.pdf-warning-hint {
+  color: #d97706;
+  line-height: 1.5;
+  font-size: 12px;
+}
+
+.pdf-warning-hint i {
+  margin-right: 4px;
+}
+
+/* --- 分页处理线框视觉展示区 --- */
+.wireframe-visual-panel {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+}
+
+.wireframe-item {
+  flex: 1 1 0;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.wireframe-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.wireframe-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: #475569;
+}
+
+.wireframe-badge {
+  font-size: 11px;
+  color: #0284c7;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+  background: #e0f2fe;
+  padding: 1px 6px;
+  border-radius: 4px;
+  line-height: 1.3;
+}
+
+.wireframe-stage {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px;
+  position: relative;
+  overflow: hidden;
+}
+
+.wireframe-single-box {
+  height: 46px;
+  border: 1.5px solid #0284c7;
+  border-radius: 4px;
+  background: #f0f9ff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 1px 2px rgba(2, 132, 199, 0.08);
+}
+
+.wireframe-box-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  font-size: 10px;
+  color: #0369a1;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+
+.wireframe-box-inner i {
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+
+.wireframe-spread-box {
+  width: 100%;
+  max-width: 176px;
+  height: 46px;
+  border: 1.5px solid #475569;
+  border-radius: 4px;
+  background: #ffffff;
+  display: flex;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.wireframe-page {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: #475569;
+  background: #f8fafc;
+  transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.wireframe-page.is-page-a {
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-weight: 500;
+}
+
+.page-tag {
+  font-size: 10px;
+  transform: scale(0.9);
+  line-height: 1.1;
+}
+
+.page-pct {
+  font-size: 9px;
+  color: #94a3b8;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+  margin-top: 1px;
+}
+
+.wireframe-page.is-page-a .page-pct {
+  color: #3b82f6;
+}
+
+.wireframe-page-overlap {
+  background: repeating-linear-gradient(
+    45deg,
+    #fef3c7,
+    #fef3c7 6px,
+    #fde68a 6px,
+    #fde68a 12px
+  );
+  border-left: 1px dashed #f59e0b;
+  border-right: 1px dashed #f59e0b;
+  color: #b45309;
+  z-index: 1;
+}
+
+.wireframe-page-overlap .overlap-tag {
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  line-height: 1.1;
+  color: #b45309;
+}
+
+.wireframe-page-overlap .overlap-pct {
+  font-size: 8px;
+  opacity: 0.9;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+  color: #b45309;
+}
+
+.wireframe-page-gap {
+  background: #f1f5f9;
+  border-left: 1px dashed #cbd5e1;
+  border-right: 1px dashed #cbd5e1;
+  color: #94a3b8;
+}
+
+.wireframe-page-gap .gap-tag {
+  font-size: 9px;
+  white-space: nowrap;
+  line-height: 1.1;
+}
+
+.wireframe-page-gap .gap-pct {
+  font-size: 8px;
+  font-family: Consolas, Monaco, "Courier New", monospace;
+}
+
+.wireframe-cut-line {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 0;
+  border-left: 2px dashed #ef4444;
+  z-index: 2;
+  transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scissor-icon {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #ffffff;
+  color: #ef4444;
+  font-size: 11px;
+  padding: 2px;
+  border-radius: 50%;
+  border: 1px solid #fca5a5;
+  line-height: 1;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.1);
+}
+
+.wireframe-caption {
+  margin-top: 5px;
+  font-size: 10px;
+  color: #94a3b8;
+  line-height: 1.3;
+  text-align: center;
+}
+
+/* 最终任务报告弹窗样式 */
+.result-dialog {
+  max-width: 680px !important;
+  width: 90% !important;
+}
+
+.result-dialog .el-message-box__message {
+  white-space: pre-wrap;
+  font-family: Consolas, Monaco, "Courier New", "Microsoft YaHei", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  max-height: 65vh;
+  overflow-y: auto;
+  color: #1e293b;
+  background: #f8fafc;
+  padding: 14px 16px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+}
+

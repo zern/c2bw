@@ -226,7 +226,7 @@ class ImageProcessorApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("智能图像预处理工具 v3.2")
+        self.root.title("智能图像预处理工具 v3.3")
         # 在较矮的屏幕上留出系统任务栏空间，其他内容通过滚动条访问。
         window_height = min(820, max(480, self.root.winfo_screenheight() - 100))
         self.root.geometry(f"700x{window_height}")
@@ -314,7 +314,7 @@ class ImageProcessorApp:
             mode_frame, text="从图片目录开始处理", variable=self.work_mode, value="dir", command=self._on_mode_changed
         ).pack(side=tk.LEFT, padx=15)
         ttk.Radiobutton(
-            mode_frame, text="从PDF文件开始处理", variable=self.work_mode, value="pdf", command=self._on_mode_changed
+            mode_frame, text="从PDF文件开始处理 (仅支持图片类型的PDF文件)", variable=self.work_mode, value="pdf", command=self._on_mode_changed
         ).pack(side=tk.LEFT, padx=15)
 
         # --- 1. 输入区域容器 ---
@@ -362,6 +362,13 @@ class ImageProcessorApp:
             foreground="#0284c7"
         )
         self.pdf_hint_label.grid(row=3, column=1, columnspan=2, sticky=tk.W, pady=3)
+
+        ttk.Label(
+            self.pdf_frame,
+            text="注：仅支持图片类型的 PDF 文件处理（扫描件、古籍、插画等图片打包生成的 PDF）",
+            font=('Microsoft YaHei', 8),
+            foreground="#d97706"
+        ).grid(row=4, column=1, columnspan=2, sticky=tk.W, pady=(1, 3))
 
         self.dir_frame.pack(fill=tk.X)
 
@@ -424,6 +431,22 @@ class ImageProcessorApp:
         dir_radio_frame.grid(row=2, column=1, columnspan=2, sticky=tk.W, pady=5)
         ttk.Radiobutton(dir_radio_frame, text="从右到左 (古籍常用, 右侧为_A)", variable=self.crop_direction, value="R2L").pack(side=tk.LEFT, padx=5)
         ttk.Radiobutton(dir_radio_frame, text="从左到右 (现代书籍, 左侧为_A)", variable=self.crop_direction, value="L2R").pack(side=tk.LEFT, padx=5)
+
+        # 动态线框视觉展示区 (排除单页比例与分割比例)
+        self.crop_wireframe_canvas = tk.Canvas(
+            self.crop_options_frame,
+            width=580,
+            height=120,
+            bg="#f8fafc",
+            highlightthickness=1,
+            highlightbackground="#cbd5e1"
+        )
+        self.crop_wireframe_canvas.grid(row=3, column=0, columnspan=3, sticky=tk.EW, pady=(8, 4), padx=2)
+
+        self.exclude_ratio.trace_add("write", self._draw_crop_wireframe)
+        self.crop_percent.trace_add("write", self._draw_crop_wireframe)
+        self.crop_direction.trace_add("write", self._draw_crop_wireframe)
+        self._draw_crop_wireframe()
 
         # --- 4. 性能与控制区域 ---
         sys_frame = ttk.Frame(main_frame)
@@ -611,12 +634,161 @@ class ImageProcessorApp:
     def toggle_crop_options(self):
         state = tk.NORMAL if self.enable_crop.get() else tk.DISABLED
         for child in self.crop_options_frame.winfo_children():
-            if isinstance(child, ttk.Frame):
+            if isinstance(child, (ttk.Frame, ttk.LabelFrame)):
                 for subchild in child.winfo_children():
-                    subchild.config(state=state)
+                    try:
+                        subchild.config(state=state)
+                    except Exception:
+                        pass
             else:
-                child.config(state=state)
+                try:
+                    child.config(state=state)
+                except Exception:
+                    pass
+        self._draw_crop_wireframe()
         self._update_pdf_hint()
+
+    def _draw_crop_wireframe(self, *args):
+        if not hasattr(self, "crop_wireframe_canvas"):
+            return
+        canvas = self.crop_wireframe_canvas
+        canvas.delete("all")
+
+        is_enabled = self.enable_crop.get()
+
+        try:
+            ex_ratio = float(self.exclude_ratio.get())
+        except (ValueError, tk.TclError):
+            ex_ratio = 0.7
+
+        try:
+            split_pct = int(self.crop_percent.get())
+        except (ValueError, tk.TclError):
+            split_pct = 50
+        split_pct = max(1, min(99, split_pct))
+
+        direction = self.crop_direction.get()
+
+        # 配色定义 (启用状态 vs 禁用置灰)
+        bg_card = "#ffffff" if is_enabled else "#f1f5f9"
+        text_primary = "#1e293b" if is_enabled else "#94a3b8"
+        text_secondary = "#64748b" if is_enabled else "#94a3b8"
+        border_box = "#94a3b8" if is_enabled else "#cbd5e1"
+        page_a_fill = "#dbeafe" if is_enabled else "#f1f5f9"
+        page_a_outline = "#3b82f6" if is_enabled else "#cbd5e1"
+        page_b_fill = "#f8fafc" if is_enabled else "#f1f5f9"
+        page_b_outline = "#94a3b8" if is_enabled else "#cbd5e1"
+        cut_line_color = "#e11d48" if is_enabled else "#cbd5e1"
+
+        # 1. 左侧：单页判定示意 (排除单页)
+        canvas.create_text(115, 15, text=f"单页判定线框 (宽/高 < {ex_ratio:.2f})", font=("Microsoft YaHei", 9, "bold"), fill=text_primary)
+
+        box_h = 56
+        box_w = max(16, min(84, int(box_h * ex_ratio)))
+        bx1 = 115 - box_w // 2
+        bx2 = 115 + box_w // 2
+        by1 = 28
+        by2 = by1 + box_h
+
+        canvas.create_rectangle(bx1, by1, bx2, by2, fill=bg_card, outline=border_box, width=1.5)
+        canvas.create_text(115, by1 + box_h // 2, text="单页原图\n(跳过裁切)", font=("Microsoft YaHei", 8), fill=text_secondary, justify=tk.CENTER)
+        canvas.create_text(115, 103, text=f"宽/高 < {ex_ratio:.2f} 视为单页不裁切", font=("Microsoft YaHei", 8), fill=text_secondary)
+
+        # 中间分割线
+        canvas.create_line(230, 10, 230, 110, fill="#e2e8f0", dash=(2, 2))
+
+        # 2. 右侧：双页裁切示意 (分割比例 & 阅读顺序 & 中缝重叠)
+        dir_text = "从右到左 (古籍)" if direction == "R2L" else "从左到右 (现代)"
+        canvas.create_text(405, 15, text=f"双页裁切线框 ({dir_text} · 左右各宽 {split_pct}%)", font=("Microsoft YaHei", 9, "bold"), fill=text_primary)
+
+        sx1 = 265
+        sx2 = 545
+        spread_w = sx2 - sx1  # 280
+        sy1 = 28
+        sy2 = sy1 + box_h     # 84
+
+        overlap_fill = "#fef3c7" if is_enabled else "#f1f5f9"
+        overlap_outline = "#f59e0b" if is_enabled else "#cbd5e1"
+        gap_fill = "#f1f5f9" if is_enabled else "#f8fafc"
+        gap_outline = "#cbd5e1" if is_enabled else "#e2e8f0"
+
+        left_is_a = (direction == "L2R")
+        left_short = "① _A" if left_is_a else "② _B"
+        right_short = "② _B" if left_is_a else "① _A"
+
+        color_a = page_a_outline if is_enabled else text_secondary
+        color_b = text_secondary
+
+        if split_pct >= 50:
+            overlap_pct = 2 * split_pct - 100
+            exclusive_pct = 100 - split_pct
+
+            cut1_x = sx1 + int(spread_w * (100 - split_pct) / 100.0)
+            cut2_x = sx1 + int(spread_w * split_pct / 100.0)
+
+            # 左侧独占区 [sx1, cut1_x]
+            canvas.create_rectangle(sx1, sy1, cut1_x, sy2, fill=page_a_fill if left_is_a else page_b_fill, outline=page_a_outline if left_is_a else page_b_outline, width=1.5)
+            left_w = cut1_x - sx1
+            if left_w >= 28:
+                txt_left = f"{left_short}\n{split_pct}%" if left_w < 55 else f"{'① 第1页 (_A)' if left_is_a else '② 第2页 (_B)'}\n宽 {split_pct}%"
+                canvas.create_text((sx1 + cut1_x) // 2, sy1 + box_h // 2, text=txt_left, font=("Microsoft YaHei", 8, "bold" if left_is_a else "normal"), fill=color_a if left_is_a else color_b, justify=tk.CENTER)
+
+            # 中缝重叠区 [cut1_x, cut2_x] (两页均包含)
+            if overlap_pct > 0:
+                canvas.create_rectangle(cut1_x, sy1, cut2_x, sy2, fill=overlap_fill, outline=overlap_outline, width=1.5)
+                overlap_w = cut2_x - cut1_x
+                if overlap_w >= 36:
+                    canvas.create_text((cut1_x + cut2_x) // 2, sy1 + box_h // 2, text=f"中缝重叠\n{overlap_pct}%", font=("Microsoft YaHei", 8, "bold"), fill="#b45309" if is_enabled else text_secondary, justify=tk.CENTER)
+                else:
+                    canvas.create_text((cut1_x + cut2_x) // 2, sy1 + box_h // 2, text=f"{overlap_pct}%", font=("Microsoft YaHei", 7, "bold"), fill="#b45309" if is_enabled else text_secondary)
+
+            # 右侧独占区 [cut2_x, sx2]
+            canvas.create_rectangle(cut2_x, sy1, sx2, sy2, fill=page_b_fill if left_is_a else page_a_fill, outline=page_b_outline if left_is_a else page_a_outline, width=1.5)
+            right_w = sx2 - cut2_x
+            if right_w >= 28:
+                txt_right = f"{right_short}\n{split_pct}%" if right_w < 55 else f"{'② 第2页 (_B)' if left_is_a else '① 第1页 (_A)'}\n宽 {split_pct}%"
+                canvas.create_text((cut2_x + sx2) // 2, sy1 + box_h // 2, text=txt_right, font=("Microsoft YaHei", 8, "bold" if not left_is_a else "normal"), fill=color_a if not left_is_a else color_b, justify=tk.CENTER)
+
+            # 裁切虚线与剪刀标记
+            if overlap_pct > 0:
+                canvas.create_line(cut1_x, sy1 - 4, cut1_x, sy2 + 4, fill=cut_line_color, width=2, dash=(4, 3))
+                canvas.create_text(cut1_x, sy1 - 5, text="✂", font=("Segoe UI Symbol", 9), fill=cut_line_color)
+            canvas.create_line(cut2_x, sy1 - 4, cut2_x, sy2 + 4, fill=cut_line_color, width=2, dash=(4, 3))
+            canvas.create_text(cut2_x, sy1 - 5, text="✂", font=("Segoe UI Symbol", 9), fill=cut_line_color)
+
+            if is_enabled:
+                if overlap_pct > 0:
+                    caption_right = f"左右各裁切 {split_pct}%，中缝重叠 {overlap_pct}%（保证中缝内容可阅读）"
+                else:
+                    caption_right = "左右各裁切 50%，居中均分裁切无重叠"
+            else:
+                caption_right = "已禁用页面裁切"
+        else:
+            # split_pct < 50
+            gap_pct = 100 - 2 * split_pct
+            cut1_x = sx1 + int(spread_w * split_pct / 100.0)
+            cut2_x = sx1 + int(spread_w * (100 - split_pct) / 100.0)
+
+            # 左页 [sx1, cut1_x]
+            canvas.create_rectangle(sx1, sy1, cut1_x, sy2, fill=page_a_fill if left_is_a else page_b_fill, outline=page_a_outline if left_is_a else page_b_outline, width=1.5)
+            canvas.create_text((sx1 + cut1_x) // 2, sy1 + box_h // 2, text=f"{left_short}\n{split_pct}%", font=("Microsoft YaHei", 8), fill=color_a if left_is_a else color_b, justify=tk.CENTER)
+
+            # 中间未裁区 [cut1_x, cut2_x]
+            canvas.create_rectangle(cut1_x, sy1, cut2_x, sy2, fill=gap_fill, outline=gap_outline, width=1.5)
+            canvas.create_text((cut1_x + cut2_x) // 2, sy1 + box_h // 2, text=f"未裁入\n{gap_pct}%", font=("Microsoft YaHei", 8), fill=text_secondary, justify=tk.CENTER)
+
+            # 右页 [cut2_x, sx2]
+            canvas.create_rectangle(cut2_x, sy1, sx2, sy2, fill=page_b_fill if left_is_a else page_a_fill, outline=page_b_outline if left_is_a else page_a_outline, width=1.5)
+            canvas.create_text((cut2_x + sx2) // 2, sy1 + box_h // 2, text=f"{right_short}\n{split_pct}%", font=("Microsoft YaHei", 8), fill=color_a if not left_is_a else color_b, justify=tk.CENTER)
+
+            canvas.create_line(cut1_x, sy1 - 4, cut1_x, sy2 + 4, fill=cut_line_color, width=2, dash=(4, 3))
+            canvas.create_text(cut1_x, sy1 - 5, text="✂", font=("Segoe UI Symbol", 9), fill=cut_line_color)
+            canvas.create_line(cut2_x, sy1 - 4, cut2_x, sy2 + 4, fill=cut_line_color, width=2, dash=(4, 3))
+            canvas.create_text(cut2_x, sy1 - 5, text="✂", font=("Segoe UI Symbol", 9), fill=cut_line_color)
+
+            caption_right = f"左右各裁切 {split_pct}%，中间未裁入 {gap_pct}%" if is_enabled else "已禁用页面裁切"
+
+        canvas.create_text(405, 103, text=caption_right, font=("Microsoft YaHei", 8), fill=text_secondary)
 
     def toggle_pause(self):
         if not self.is_processing: return
@@ -796,14 +968,21 @@ class ImageProcessorApp:
                 pass
 
     @staticmethod
-    def _result(ok, message, error=None):
-        return {'ok': ok, 'message': message, 'error': error}
+    def _result(ok, message, error=None, is_single=False, is_excluded_single=False, output_count=0):
+        return {
+            'ok': ok,
+            'message': message,
+            'error': error,
+            'is_single': is_single,
+            'is_excluded_single': is_excluded_single,
+            'output_count': output_count,
+        }
 
     def process_single_image(self, src_path, rel_path, filename, output_stem, settings):
         self.pause_event.wait()
         
         if self.cancel_event.is_set():
-            return self._result(False, "中止", "任务已取消")
+            return self._result(False, "中止", "任务已取消", is_single=False, is_excluded_single=False, output_count=0)
 
         output_paths = []
         img = None
@@ -812,18 +991,19 @@ class ImageProcessorApp:
             w, h = img.size 
             
             if h <= 0:
-                return self._result(False, f"跳过: 图片高度为0 {filename}", "图片高度为 0")
+                return self._result(False, f"跳过: 图片高度为0 {filename}", "图片高度为 0", is_single=False, is_excluded_single=False, output_count=0)
                 
             aspect_ratio = w / h
             original_ext = os.path.splitext(filename)[1].lower()
             if original_ext not in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2']:
-                return self._result(False, f"跳过: 非支持的扩展名 {filename}", "不支持的扩展名")
+                return self._result(False, f"跳过: 非支持的扩展名 {filename}", "不支持的扩展名", is_single=False, is_excluded_single=False, output_count=0)
 
             out_dir = os.path.join(settings['target_dir'], os.path.dirname(rel_path))
             os.makedirs(out_dir, exist_ok=True)
             base_name = output_stem
             jpeg_save_options = self._get_jpeg_save_options(img)
 
+            is_excluded = settings['enable_crop'] and (aspect_ratio < settings['exclude_ratio'])
             if not settings['enable_crop'] or aspect_ratio < settings['exclude_ratio']:
                 # 未二值化、保持格式且未实际裁切时，直接复制源文件以完整保留 JPEG 品质与元数据。
                 if not settings['enable_binarize'] and settings['non_bin_format'] == 'keep':
@@ -837,7 +1017,14 @@ class ImageProcessorApp:
                     output_paths.append(self.save_image(
                         img, path_base, original_ext, settings, jpeg_save_options,
                     ))
-                return self._result(True, f"处理完成 (单页): {filename}")
+                tag = "排除单页" if is_excluded else "单页"
+                return self._result(
+                    True,
+                    f"处理完成 ({tag}): {filename}",
+                    is_single=True,
+                    is_excluded_single=is_excluded,
+                    output_count=len(output_paths),
+                )
 
             # 一次只保留一个裁切页，降低大图在多线程下的峰值内存。
             img.load()
@@ -867,11 +1054,17 @@ class ImageProcessorApp:
                     ))
                 finally:
                     cropped_img.close()
-            return self._result(True, f"处理完成 (裁切): {filename}")
+            return self._result(
+                True,
+                f"处理完成 (裁切双页): {filename}",
+                is_single=False,
+                is_excluded_single=False,
+                output_count=len(output_paths),
+            )
 
         except Exception as e:
             self._remove_outputs(output_paths)
-            return self._result(False, f"错误 {filename}: {str(e)}", str(e))
+            return self._result(False, f"错误 {filename}: {str(e)}", str(e), is_single=False, is_excluded_single=False, output_count=0)
         finally:
             if img is not None:
                 img.close()
@@ -893,6 +1086,7 @@ class ImageProcessorApp:
             source_text = self.source_dir.get().strip()
             target_text = self.target_dir.get().strip()
             settings = {
+                'work_mode': 'dir',
                 'source_dir': os.path.abspath(source_text) if source_text else '',
                 'target_dir': os.path.abspath(target_text) if target_text else '',
                 'include_subfolders': self.include_subfolders.get(),
@@ -1007,6 +1201,7 @@ class ImageProcessorApp:
                 return
 
             settings = {
+                'work_mode': 'pdf',
                 'pdf_path': os.path.abspath(pdf_path),
                 'source_dir': os.path.abspath(task_dir),
                 'target_dir': os.path.abspath(os.path.join(task_dir, 'output')),
@@ -1126,12 +1321,19 @@ class ImageProcessorApp:
 
         # 如果勾选不转换为 PDF，且未选择色彩处理和处理分页：直接提取完成即可
         if not settings.get('enable_crop', False) and not settings.get('enable_binarize', False) and (settings.get('no_convert_pdf', False) or not settings.get('enable_pdf', True)):
-            summary_msg = (
-                f"PDF 原始图片提取完成！\n"
-                f"- 提取目录: {raw_dir}\n"
-                f"- 共提取原始图片: {extracted_count} 张\n"
-                f"- 未执行裁切、色彩处理或合并 PDF。"
-            )
+            summary = {
+                'settings': settings,
+                'total_input': extracted_count,
+                'total': extracted_count,
+                'succeeded': extracted_count,
+                'total_output_images': extracted_count,
+                'excluded_single_count': extracted_count,
+                'cropped_double_count': 0,
+                'errors': [],
+                'collision_groups': 0,
+                'images_kept': True,
+            }
+            summary_msg = self._build_and_save_task_report(summary, raw_dir)
             self.ui_events.put(('finish', summary_msg))
             return
 
@@ -1153,6 +1355,10 @@ class ImageProcessorApp:
         processed = 0
         succeeded = 0
         errors = []
+        total_output_images = 0
+        excluded_single_count = 0
+        cropped_double_count = 0
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=settings['max_threads']) as executor:
             future_to_file = {
                 executor.submit(
@@ -1167,10 +1373,15 @@ class ImageProcessorApp:
                 try:
                     result = future.result()
                 except Exception as e:
-                    result = self._result(False, f"错误 {task[2]}: {str(e)}", str(e))
+                    result = self._result(False, f"错误 {task[2]}: {str(e)}", str(e), is_single=False, is_excluded_single=False, output_count=0)
                 processed += 1
                 if result['ok']:
                     succeeded += 1
+                    total_output_images += result.get('output_count', 1)
+                    if result.get('is_excluded_single'):
+                        excluded_single_count += 1
+                    elif not result.get('is_single'):
+                        cropped_double_count += 1
                 elif not self.cancel_event.is_set():
                     errors.append(f"{task[1]}：{result['error'] or result['message']}")
                 self.ui_events.put((
@@ -1215,15 +1426,19 @@ class ImageProcessorApp:
             except Exception:
                 pass
 
-            summary_msg = (
-                f"PDF 处理完成（未合并为 PDF）！\n"
-                f"- 从 PDF 提取图片: {extracted_count} 张\n"
-                f"- 成功预处理: {succeeded} / {total_files} 项\n"
-                f"- 处理后的图片已保存在目录: {raw_dir}\n"
-                f"- 临时提取的原图已自动清理。"
-            )
-            if errors:
-                summary_msg += f"\n- 出现错误: {len(errors)} 个"
+            summary = {
+                'settings': settings,
+                'total_input': extracted_count,
+                'total': total_files,
+                'succeeded': succeeded,
+                'total_output_images': total_output_images,
+                'excluded_single_count': excluded_single_count,
+                'cropped_double_count': cropped_double_count,
+                'errors': errors,
+                'collision_groups': collision_groups,
+                'images_kept': True,
+            }
+            summary_msg = self._build_and_save_task_report(summary, raw_dir)
             self.ui_events.put(('finish', summary_msg))
             return
 
@@ -1265,6 +1480,8 @@ class ImageProcessorApp:
                 fpath = os.path.join(raw_dir, fname)
                 if os.path.normcase(os.path.abspath(fpath)) == os.path.normcase(os.path.abspath(final_pdf)):
                     continue
+                if fname.lower() in ['task_report.txt', 'task_log.txt']:
+                    continue
                 try:
                     if os.path.isfile(fpath) or os.path.islink(fpath):
                         os.remove(fpath)
@@ -1275,15 +1492,24 @@ class ImageProcessorApp:
         except Exception:
             pass
 
-        summary_msg = (
-            f"PDF 处理完成！\n"
-            f"- 从 PDF 提取图片: {extracted_count} 张\n"
-            f"- 成功预处理: {succeeded} / {total_files} 项\n"
-            f"- 已生成新 PDF: {final_pdf}\n"
-            f"- 临时分页图片已自动清理，仅保留处理后的 PDF 文件。"
+        summary = {
+            'settings': settings,
+            'total_input': extracted_count,
+            'total': total_files,
+            'succeeded': succeeded,
+            'total_output_images': total_output_images,
+            'excluded_single_count': excluded_single_count,
+            'cropped_double_count': cropped_double_count,
+            'errors': errors,
+            'collision_groups': collision_groups,
+            'images_kept': False,
+        }
+        summary_msg = self._build_and_save_task_report(
+            summary, raw_dir,
+            pdf_path=final_pdf,
+            pdf_count=1,
+            keep_images=False,
         )
-        if errors:
-            summary_msg += f"\n- 出现错误: {len(errors)} 个"
         self.ui_events.put(('finish', summary_msg))
 
 
@@ -1351,25 +1577,127 @@ class ImageProcessorApp:
 
         return assigned, collision_groups
 
+    def _build_and_save_task_report(self, summary, target_dir, **kwargs):
+        """生成任务报告文本并在目标目录输出 task_report.txt 文件。"""
+        report_file = os.path.join(target_dir, "task_report.txt") if (target_dir and os.path.isdir(target_dir)) else None
+        summary['report_file'] = report_file
+        report_text = self._completion_text(summary, **kwargs)
+        if report_file:
+            try:
+                with open(report_file, "w", encoding="utf-8") as f:
+                    f.write(report_text)
+            except Exception:
+                pass
+        return report_text
+
     @staticmethod
-    def _completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False):
-        lines = [f"处理完成！成功处理 {summary['succeeded']} / {summary['total']} 个文件。"]
-        if summary['collision_groups']:
-            lines.append(
-                f"已为 {summary['collision_groups']} 组同名不同格式文件自动附加来源扩展名，避免互相覆盖。"
-            )
-        if summary['errors']:
-            lines.append(f"失败或跳过 {len(summary['errors'])} 个文件：")
-            lines.extend(f"- {item}" for item in summary['errors'][:5])
-            if len(summary['errors']) > 5:
-                lines.append(f"- 另有 {len(summary['errors']) - 5} 个文件未完成。")
-        if pdf_count is not None:
-            if keep_images:
-                lines.append(f"已生成 {pdf_count} 个 PDF，并保留了处理后的图片。")
+    def _completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, pdf_path=None):
+        settings = summary.get('settings') or {}
+        work_mode = settings.get('work_mode', 'dir')
+        is_pdf_mode = (work_mode == 'pdf')
+
+        lines = [
+            "==================== 最终任务日志报告 ====================",
+            "",
+            "【转换设定参数】",
+        ]
+
+        mode_desc = "从PDF文件开始处理" if is_pdf_mode else "从图片目录开始处理"
+        lines.append(f"- 工作模式: {mode_desc}")
+        if is_pdf_mode:
+            lines.append(f"- 输入文件: {settings.get('pdf_path', '')}")
+            lines.append(f"- 任务输出目录: {settings.get('clean_dir', settings.get('target_dir', ''))}")
+        else:
+            lines.append(f"- 输入图片目录: {settings.get('source_dir', '')}")
+            lines.append(f"- 输出目标目录: {settings.get('target_dir', '')}")
+            lines.append(f"- 递归子目录: {'是' if settings.get('include_subfolders') else '否'}")
+
+        # 色彩处理参数
+        if settings.get('enable_binarize'):
+            method_desc = "局部动态自适应二值化 (默认)" if str(settings.get('bin_method')) == "0" else f"全局固定阈值二值化 (阈值: {settings.get('threshold_val', 50)})"
+            lines.append(f"- 色彩处理: 已启用 [{method_desc}]")
+        else:
+            fmt_desc = "保持原格式" if settings.get('non_bin_format') == 'keep' else "转换为 JPG (质量 80)"
+            lines.append(f"- 色彩处理: 未启用 (输出格式: {fmt_desc})")
+
+        # 分页裁切参数
+        if settings.get('enable_crop'):
+            dir_desc = "从右到左 (古籍常用, 右侧为_A)" if settings.get('crop_direction') == 'R2L' else "从左到右 (现代书籍, 左侧为_A)"
+            p = settings.get('crop_percent', 50)
+            overlap = max(0, 2 * p - 100)
+            crop_detail = f"左右各宽 {p}%"
+            if overlap > 0:
+                crop_detail += f"，中缝重叠 {overlap}%"
+            lines.append(f"- 分页处理: 已启用 [排除单页比例: < {settings.get('exclude_ratio', 0.7):.2f}，分割比例: {crop_detail}，阅读顺序: {dir_desc}]")
+        else:
+            lines.append("- 分页处理: 未启用 (不裁切)")
+
+        # PDF 输出参数
+        if is_pdf_mode:
+            if settings.get('no_convert_pdf'):
+                lines.append("- PDF 输出: 不转换为 PDF (仅保留处理后的图片文件)")
             else:
-                lines.append(f"已生成 {pdf_count} 个 PDF。已自动清理处理后的图片，仅保留 PDF 文件。")
+                lines.append("- PDF 输出: 合并为新 PDF 并自动清理临时分页图片")
+        else:
+            if pdf_count is not None or settings.get('enable_pdf'):
+                keep_img = "保留处理后的图片" if settings.get('keep_images_after_pdf', keep_images) else "转换为PDF后自动清理图片"
+                lines.append(f"- PDF 输出: 合并输出为单个 PDF ({keep_img})")
+            else:
+                lines.append("- PDF 输出: 未合并为 PDF (仅输出图片)")
+
+        lines.append(f"- 最大线程数: {settings.get('max_threads', 4)}")
+        lines.append("")
+
+        # 2. 数量统计
+        lines.append("【图片与分页统计】")
+        total_input = summary.get('total_input', summary.get('total', 0))
+        if is_pdf_mode:
+            lines.append(f"- 原始文件包含的图片/分页数量: {total_input} 张 (从 PDF 提取)")
+        else:
+            lines.append(f"- 原始文件包含的图片/分页数量: {total_input} 张")
+
+        total_output = summary.get('total_output_images', 0)
+        excluded_single = summary.get('excluded_single_count', 0)
+        cropped_double = summary.get('cropped_double_count', 0)
+
+        if settings.get('enable_crop'):
+            lines.append(f"- 转换后的图片总量: {total_output} 张 (其中排除单页数量: {excluded_single} 张，裁切双页数量: {cropped_double} 张 -> 分割生成 {cropped_double * 2} 张)")
+        else:
+            lines.append(f"- 转换后的图片总量: {total_output} 张 (未启用裁切，全为单页)")
+
+        succeeded = summary.get('succeeded', 0)
+        total_tasks = summary.get('total', total_input)
+        lines.append(f"- 任务成功项数: {succeeded} / {total_tasks}")
+
+        if summary.get('collision_groups'):
+            lines.append(f"- 同名消歧重命名: 为 {summary['collision_groups']} 组同名不同格式文件自动附加来源扩展名")
+        if summary.get('errors'):
+            lines.append(f"- 失败或跳过 {len(summary['errors'])} 项：")
+            for item in summary['errors'][:5]:
+                lines.append(f"  * {item}")
+            if len(summary['errors']) > 5:
+                lines.append(f"  * ... 另有 {len(summary['errors']) - 5} 项未显示")
+        lines.append("")
+
+        # 3. 输出交付详情
+        lines.append("【输出成果】")
+        if pdf_path:
+            lines.append(f"- 生成 PDF 文件: {pdf_path}")
+        elif pdf_count is not None:
+            lines.append(f"- 已生成 {pdf_count} 个 PDF 文件")
         if pdf_error:
-            lines.append(f"PDF 生成失败：{pdf_error}")
+            lines.append(f"- PDF 生成异常: {pdf_error}")
+
+        if summary.get('images_kept', True) and (not is_pdf_mode or settings.get('no_convert_pdf') or settings.get('keep_images_after_pdf', keep_images)):
+            target_out = (settings.get('clean_dir') or settings.get('source_dir', '')) if is_pdf_mode else (settings.get('target_dir', ''))
+            lines.append(f"- 处理图片输出目录: {target_out}")
+        else:
+            lines.append("- 处理图片文件: 已自动清理临时分页图片，仅保留生成的 PDF 文件")
+
+        if summary.get('report_file'):
+            lines.append(f"- 任务日志报告已保存至: {summary['report_file']}")
+
+        lines.append("==========================================================")
         return '\n'.join(lines)
 
     def _build_pdf(self, settings):
@@ -1670,19 +1998,22 @@ class ImageProcessorApp:
         if self.cancel_event.is_set():
             self.ui_events.put(('finish', self._clean_cancelled_output(settings['target_dir'])))
         elif success:
-            self.ui_events.put((
-                'finish',
-                self._completion_text(
-                    summary,
-                    pdf_count=len(result),
-                    keep_images=settings.get('keep_images_after_pdf', False),
-                ),
-            ))
+            summary['images_kept'] = settings.get('keep_images_after_pdf', False)
+            summary_msg = self._build_and_save_task_report(
+                summary,
+                settings['target_dir'],
+                pdf_count=len(result),
+                pdf_path=result[0] if len(result) == 1 else None,
+                keep_images=settings.get('keep_images_after_pdf', False),
+            )
+            self.ui_events.put(('finish', summary_msg))
         else:
-            self.ui_events.put((
-                'finish',
-                self._completion_text(summary, pdf_error=result),
-            ))
+            summary_msg = self._build_and_save_task_report(
+                summary,
+                settings['target_dir'],
+                pdf_error=result,
+            )
+            self.ui_events.put(('finish', summary_msg))
 
     def _prompt_pdf_generation(self, settings, summary):
         """图片处理完成后，在主线程询问是否继续合并 PDF。"""
@@ -1700,7 +2031,9 @@ class ImageProcessorApp:
             ).start()
             self.root.after(50, self._poll_ui_events)
         else:
-            self._finish_processing(self._completion_text(summary))
+            summary['images_kept'] = True
+            summary_msg = self._build_and_save_task_report(summary, settings['target_dir'])
+            self._finish_processing(summary_msg)
 
     def _run_task(self, settings):
         src_dir = settings['source_dir']
@@ -1742,6 +2075,10 @@ class ImageProcessorApp:
         processed = 0
         succeeded = 0
         errors = []
+        total_output_images = 0
+        excluded_single_count = 0
+        cropped_double_count = 0
+
         with concurrent.futures.ThreadPoolExecutor(max_workers=settings['max_threads']) as executor:
             future_to_file = {
                 executor.submit(
@@ -1756,10 +2093,15 @@ class ImageProcessorApp:
                 try:
                     result = future.result()
                 except Exception as e:
-                    result = self._result(False, f"错误 {task[2]}: {str(e)}", str(e))
+                    result = self._result(False, f"错误 {task[2]}: {str(e)}", str(e), is_single=False, is_excluded_single=False, output_count=0)
                 processed += 1
                 if result['ok']:
                     succeeded += 1
+                    total_output_images += result.get('output_count', 1)
+                    if result.get('is_excluded_single'):
+                        excluded_single_count += 1
+                    elif not result.get('is_single'):
+                        cropped_double_count += 1
                 elif not self.cancel_event.is_set():
                     errors.append(f"{task[1]}：{result['error'] or result['message']}")
                 self.ui_events.put((
@@ -1769,10 +2111,16 @@ class ImageProcessorApp:
                 ))
 
         summary = {
+            'settings': settings,
+            'total_input': total_files,
             'total': total_files,
             'succeeded': succeeded,
+            'total_output_images': total_output_images,
+            'excluded_single_count': excluded_single_count,
+            'cropped_double_count': cropped_double_count,
             'errors': errors,
             'collision_groups': collision_groups,
+            'images_kept': True,
         }
 
         if self.cancel_event.is_set():
@@ -1890,15 +2238,15 @@ class WebImageProcessorService(ImageProcessorApp):
         try:
             request = urllib.request.Request(
                 self.UPDATE_INFO_URL,
-                headers={'User-Agent': 'SHUGE-C2BW/3.2'},
+                headers={'User-Agent': 'SHUGE-C2BW/3.3'},
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 data = json.loads(response.read().decode('utf-8-sig'))
             if not isinstance(data, dict) or not data.get('version'):
                 raise ValueError('服务器返回的更新信息格式无效。')
-            return {'ok': True, 'current_version': '3.2.0.0', 'update': data, 'source': 'server'}
+            return {'ok': True, 'current_version': '3.3.0.0', 'update': data, 'source': 'server'}
         except Exception:
-            return {'ok': False, 'current_version': '3.2.0.0'}
+            return {'ok': False, 'current_version': '3.3.0.0'}
 
     def open_download_url(self, url):
         try:
@@ -2019,6 +2367,7 @@ class WebImageProcessorService(ImageProcessorApp):
             source_text = str(raw_settings.get('source_dir', '')).strip()
             target_text = str(raw_settings.get('target_dir', '')).strip()
             settings = {
+                'work_mode': 'dir',
                 'source_dir': os.path.abspath(source_text) if source_text else '',
                 'target_dir': os.path.abspath(target_text) if target_text else '',
                 'include_subfolders': bool(raw_settings.get('include_subfolders', False)),
@@ -2093,6 +2442,7 @@ class WebImageProcessorService(ImageProcessorApp):
                 final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
 
             settings = {
+                'work_mode': 'pdf',
                 'pdf_path': os.path.abspath(pdf_path),
                 'source_dir': os.path.abspath(task_dir),
                 'target_dir': os.path.abspath(os.path.join(task_dir, 'output')),
@@ -2248,7 +2598,9 @@ class WebImageProcessorService(ImageProcessorApp):
             ).start()
             return {'ok': True, 'message': '正在生成汇总 PDF...'}
 
-        self.ui_events.put(('finish', self._completion_text(summary)))
+        summary['images_kept'] = True
+        summary_msg = self._build_and_save_task_report(summary, settings['target_dir'])
+        self.ui_events.put(('finish', summary_msg))
         return {'ok': True, 'message': '处理完成。'}
 
     def poll_events(self):
@@ -2377,7 +2729,7 @@ def launch_web_ui():
     bridge = WebImageProcessorBridge(service)
     index_path = _resource_path('webui', 'index.html')
     window = webview.create_window(
-        '智能图像预处理工具 v3.2',
+        '智能图像预处理工具 v3.3',
         url=index_path,
         # 同时使用显式 expose，避免部分 Win7/MSHTML 环境在反射继承类时
         # 生成空的 API 列表。
