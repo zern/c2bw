@@ -281,6 +281,8 @@ class ImageProcessorApp:
         self.output_write_lock = threading.Lock()
 
         self._build_ui()
+        if sys.platform == 'win32':
+            self.root.after(100, self._setup_drag_and_drop)
 
     def _build_ui(self):
         scroll_container = ttk.Frame(self.root)
@@ -610,6 +612,80 @@ class ImageProcessorApp:
         if folder_selected:
             var.set(folder_selected)
 
+    def _setup_drag_and_drop(self):
+        """为 Tkinter 原生界面启用 Windows 资源管理器文件/目录拖拽接收。"""
+        if sys.platform != 'win32':
+            return
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            hwnd = self.root.winfo_id()
+            hwnd = ctypes.windll.user32.GetAncestor(hwnd, 2) or hwnd
+            ctypes.windll.shell32.DragAcceptFiles(hwnd, True)
+
+            GWL_WNDPROC = -4
+            WNDPROC = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM)
+
+            if ctypes.sizeof(ctypes.c_void_p) == 8:
+                GetWindowLong = ctypes.windll.user32.GetWindowLongPtrW
+                SetWindowLong = ctypes.windll.user32.SetWindowLongPtrW
+            else:
+                GetWindowLong = ctypes.windll.user32.GetWindowLongW
+                SetWindowLong = ctypes.windll.user32.SetWindowLongW
+
+            old_wndproc = GetWindowLong(hwnd, GWL_WNDPROC)
+
+            def new_wndproc(h_wnd, msg, w_param, l_param):
+                if msg == 0x0233:  # WM_DROPFILES
+                    h_drop = w_param
+                    count = ctypes.windll.shell32.DragQueryFileW(h_drop, 0xFFFFFFFF, None, 0)
+                    paths = []
+                    for i in range(count):
+                        length = ctypes.windll.shell32.DragQueryFileW(h_drop, i, None, 0)
+                        buf = ctypes.create_unicode_buffer(length + 1)
+                        ctypes.windll.shell32.DragQueryFileW(h_drop, i, buf, length + 1)
+                        paths.append(buf.value)
+                    ctypes.windll.shell32.DragFinish(h_drop)
+                    if paths:
+                        self.root.after(0, self._on_native_drop, paths)
+                    return 0
+                return ctypes.windll.user32.CallWindowProcW(old_wndproc, h_wnd, msg, w_param, l_param)
+
+            self._drop_wndproc = WNDPROC(new_wndproc)
+            SetWindowLong(hwnd, GWL_WNDPROC, self._drop_wndproc)
+        except Exception:
+            pass
+
+    def _on_native_drop(self, paths):
+        if not paths:
+            return
+        path = paths[0].strip().strip('"').strip("'")
+        if not os.path.exists(path):
+            return
+        path = os.path.abspath(path)
+        if os.path.isdir(path):
+            self.work_mode.set("dir")
+            self._on_mode_changed()
+            self.source_dir.set(path)
+            self.target_dir.set(os.path.join(path, "output"))
+            self.status_label.config(text=f"已通过拖拽载入输入图片目录: {os.path.basename(path)}")
+        elif os.path.isfile(path):
+            ext = os.path.splitext(path)[1].lower()
+            if ext == '.pdf':
+                self.work_mode.set("pdf")
+                self._on_mode_changed()
+                self.pdf_file_path.set(path)
+                self._update_pdf_target_preview()
+                self.status_label.config(text=f"已通过拖拽载入待处理 PDF 文件: {os.path.basename(path)}")
+            elif ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2'):
+                parent_dir = os.path.dirname(path)
+                self.work_mode.set("dir")
+                self._on_mode_changed()
+                self.source_dir.set(parent_dir)
+                self.target_dir.set(os.path.join(parent_dir, "output"))
+                self.status_label.config(text=f"已通过拖拽载入图片所在目录: {os.path.basename(parent_dir)}")
+
     def toggle_bin_options(self):
         state = tk.NORMAL if self.enable_binarize.get() else tk.DISABLED
         self.rb_otsu.config(state=state)
@@ -841,6 +917,33 @@ class ImageProcessorApp:
         return int(np.nanargmax(sigma_b_squared))
 
     @staticmethod
+    def _parse_jp2_dpi(filepath):
+        """尝试从 JP2 文件的 res 盒子（resc 捕获分辨率或 resd 显示分辨率）中提取真实 DPI。"""
+        try:
+            with open(filepath, 'rb') as f:
+                data = f.read(131072)
+                idx = data.find(b'res ')
+                if idx != -1:
+                    sub = data[idx:]
+                    for tag in (b'resc', b'resd'):
+                        c_idx = sub.find(tag)
+                        if c_idx != -1:
+                            box_data = sub[c_idx + 4:c_idx + 14]
+                            if len(box_data) >= 10:
+                                import struct
+                                vr_n, vr_d, hr_n, hr_d, vr_e, hr_e = struct.unpack('>HHHHbb', box_data)
+                                if vr_d != 0 and hr_d != 0:
+                                    v_res = (vr_n / vr_d) * (10 ** vr_e)
+                                    h_res = (hr_n / hr_d) * (10 ** hr_e)
+                                    dpi_y = v_res * 0.0254
+                                    dpi_x = h_res * 0.0254
+                                    if dpi_x > 10.0 and dpi_y > 10.0:
+                                        return (round(dpi_x, 2), round(dpi_y, 2))
+        except Exception:
+            pass
+        return None
+
+    @staticmethod
     def _get_jpeg_save_options(source_img):
         """尽量保留源 JPEG 的量化表和色度抽样，避免裁切后默认变成质量 95。"""
         quantization = getattr(source_img, 'quantization', None)
@@ -903,8 +1006,19 @@ class ImageProcessorApp:
                 final_img = Image.fromarray(binary_array).convert('1')
                 output_path = f"{out_path_base}.tif"
                 save_kwargs = {'compression': 'group4'}
-                if hasattr(pil_img, 'info') and 'dpi' in pil_img.info:
-                    save_kwargs['dpi'] = pil_img.info['dpi']
+
+                # 提取并确保写入合理的 DPI（源图无有效 DPI 或 JP2 缺省时使用 300 DPI，防止生成 1 DPI 的超大 PDF 页面）
+                dpi_val = pil_img.info.get('dpi') if hasattr(pil_img, 'info') else None
+                if not dpi_val or (isinstance(dpi_val, (tuple, list)) and (not dpi_val[0] or float(dpi_val[0]) <= 10.0)):
+                    dpi_val = (300.0, 300.0)
+                elif not isinstance(dpi_val, (tuple, list)):
+                    try:
+                        dpi_num = float(dpi_val)
+                        dpi_val = (dpi_num, dpi_num) if dpi_num > 10.0 else (300.0, 300.0)
+                    except (ValueError, TypeError):
+                        dpi_val = (300.0, 300.0)
+                save_kwargs['dpi'] = (float(dpi_val[0]), float(dpi_val[1]))
+
                 self._save_image_atomically(
                     final_img,
                     output_path,
@@ -988,13 +1102,17 @@ class ImageProcessorApp:
         img = None
         try:
             img = Image.open(src_path)
+            original_ext = os.path.splitext(filename)[1].lower()
+            if original_ext in ('.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c') and 'dpi' not in img.info:
+                jp2_dpi = self._parse_jp2_dpi(src_path)
+                if jp2_dpi:
+                    img.info['dpi'] = jp2_dpi
             w, h = img.size 
             
             if h <= 0:
                 return self._result(False, f"跳过: 图片高度为0 {filename}", "图片高度为 0", is_single=False, is_excluded_single=False, output_count=0)
                 
             aspect_ratio = w / h
-            original_ext = os.path.splitext(filename)[1].lower()
             if original_ext not in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2']:
                 return self._result(False, f"跳过: 非支持的扩展名 {filename}", "不支持的扩展名", is_single=False, is_excluded_single=False, output_count=0)
 
@@ -1816,13 +1934,23 @@ class ImageProcessorApp:
                 dpi_y = float(dpi[1] or default_res)
             else:
                 dpi_x = dpi_y = float(dpi or default_res)
-            if dpi_x <= 0:
+            # 如果 DPI 缺失、为 1（TIFF 无单位缺省值）或 <= 10，自动使用合理的 default_res（300 DPI）
+            if dpi_x <= 10.0 or dpi_y <= 10.0:
                 dpi_x = default_res
-            if dpi_y <= 0:
                 dpi_y = default_res
 
             width_pt = w * 72.0 / dpi_x
             height_pt = h * 72.0 / dpi_y
+
+            # 严格确保单页尺寸在 PDF 规范与 Adobe Acrobat 允许范围 [3, 14400] 磅内（最大 200 英寸，防止页面超出范围报错）
+            if width_pt > 14400.0 or height_pt > 14400.0:
+                scale = max(width_pt / 14400.0, height_pt / 14400.0)
+                width_pt = max(3.0, width_pt / scale)
+                height_pt = max(3.0, height_pt / scale)
+            elif width_pt < 3.0 or height_pt < 3.0:
+                scale = max(3.0 / width_pt, 3.0 / height_pt)
+                width_pt = min(14400.0, width_pt * scale)
+                height_pt = min(14400.0, height_pt * scale)
 
             is_bilevel = (im.mode == '1') or (im.format == 'TIFF' and im.tag_v2.get(259) == 4)
             if is_bilevel:
@@ -2406,6 +2534,51 @@ class WebImageProcessorService(ImageProcessorApp):
         except Exception as e:
             return {'ok': False, 'error': str(e)}
 
+    def handle_dropped_path(self, path):
+        """解析拖拽到窗口的文件或目录路径，识别类型并返回建议的表单设定。"""
+        path = str(path or '').strip().strip('"').strip("'")
+        if not path:
+            return {'ok': False, 'error': '拖拽路径为空。'}
+        if not os.path.exists(path):
+            return {'ok': False, 'error': f'拖拽的路径不存在或不可访问：{path}'}
+
+        path = os.path.abspath(path)
+        if os.path.isdir(path):
+            suggested_target = os.path.join(path, 'output')
+            return {
+                'ok': True,
+                'type': 'dir',
+                'path': path,
+                'suggested_target_dir': suggested_target,
+            }
+
+        if os.path.isfile(path):
+            ext = os.path.splitext(path)[1].lower()
+            if ext == '.pdf':
+                pdf_dir = os.path.dirname(path)
+                pdf_name = os.path.splitext(os.path.basename(path))[0]
+                return {
+                    'ok': True,
+                    'type': 'pdf',
+                    'path': path,
+                    'pdf_dir': pdf_dir,
+                    'pdf_name': pdf_name,
+                }
+            elif ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2'):
+                parent_dir = os.path.dirname(path)
+                suggested_target = os.path.join(parent_dir, 'output')
+                return {
+                    'ok': True,
+                    'type': 'image',
+                    'path': path,
+                    'parent_dir': parent_dir,
+                    'suggested_target_dir': suggested_target,
+                }
+            else:
+                return {'ok': False, 'error': f'不支持的文件格式：{ext}（请拖入图片目录、PDF 文件或图片文件）'}
+
+        return {'ok': False, 'error': '未知的路径类型。'}
+
     def choose_directory(self, initial_directory=''):
         """显示系统目录选择器，返回所选路径。"""
         if self.window is None:
@@ -2828,6 +3001,9 @@ class WebImageProcessorBridge:
     def __init__(self, service):
         self.service = service
 
+    def handle_dropped_path(self, path):
+        return self.service.handle_dropped_path(path)
+
     def choose_directory(self, initial_directory=''):
         return self.service.choose_directory(initial_directory)
 
@@ -2893,6 +3069,7 @@ def launch_web_ui():
     )
     service.bind_window(window)
     window.expose(
+        bridge.handle_dropped_path,
         bridge.choose_directory,
         bridge.choose_pdf_file,
         bridge.start_pdf_extraction,
@@ -2907,6 +3084,30 @@ def launch_web_ui():
         bridge.poll_events,
         bridge.open_output_folder,
     )
+
+    def _enable_native_winforms_drop():
+        if sys.platform != 'win32':
+            return
+        try:
+            import clr
+            clr.AddReference('System.Windows.Forms')
+            import System.Windows.Forms as WinForms
+            for form in WinForms.Application.OpenForms:
+                form.AllowDrop = True
+                def _on_drag_enter(sender, e):
+                    if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
+                        e.Effect = WinForms.DragDropEffects.Copy
+                def _on_drag_drop(sender, e):
+                    if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
+                        files = list(e.Data.GetData(WinForms.DataFormats.FileDrop))
+                        if files:
+                            window.evaluate_js(f"window.__onNativeFileDrop && window.__onNativeFileDrop({json.dumps(files)})")
+                form.DragEnter += _on_drag_enter
+                form.DragDrop += _on_drag_drop
+        except Exception:
+            pass
+
+    window.events.shown += _enable_native_winforms_drop
 
     # Win7 没有 WebView2，使用系统 IE11/MSHTML；新系统优先使用 WebView2。
     legacy_windows = sys.platform == 'win32' and sys.getwindowsversion().major <= 6

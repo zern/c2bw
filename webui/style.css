@@ -667,3 +667,45 @@ body {
   border: 1px solid #e2e8f0;
 }
 
+/* 拖拽提示遮罩层 */
+.drag-drop-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(22, 60, 104, 0.78);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.drag-drop-box {
+  background: #ffffff;
+  border: 3px dashed #2f80ed;
+  border-radius: 16px;
+  padding: 36px 52px;
+  text-align: center;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
+}
+
+.drag-drop-box i {
+  font-size: 52px;
+  color: #2f80ed;
+  margin-bottom: 12px;
+}
+
+.drag-drop-title {
+  font-size: 19px;
+  font-weight: 600;
+  color: #1a202c;
+  margin-bottom: 6px;
+}
+
+.drag-drop-subtitle {
+  font-size: 13px;
+  color: #64748b;
+}
+

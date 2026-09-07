@@ -6,6 +6,7 @@
     data: function () {
       return {
         bridgeReady: false,
+        isDragging: false,
         updateAvailable: false,
         updateInfo: {},
         directoryLoading: '',
@@ -152,6 +153,47 @@
       window.addEventListener('pywebviewready', connectBridge);
       connectBridge();
       vm.bridgeRetryTimer = window.setInterval(connectBridge, 250);
+
+      // 注册拖拽与释放事件监听
+      var dragCounter = 0;
+      window.addEventListener('dragenter', function (e) {
+        e.preventDefault();
+        dragCounter += 1;
+        vm.isDragging = true;
+      });
+      window.addEventListener('dragover', function (e) {
+        e.preventDefault();
+      });
+      window.addEventListener('dragleave', function (e) {
+        e.preventDefault();
+        dragCounter -= 1;
+        if (dragCounter <= 0) {
+          dragCounter = 0;
+          vm.isDragging = false;
+        }
+      });
+      window.addEventListener('drop', function (e) {
+        e.preventDefault();
+        dragCounter = 0;
+        vm.isDragging = false;
+        var dt = e.dataTransfer;
+        if (!dt) return;
+        var files = dt.files;
+        if (files && files.length > 0) {
+          var first = files[0];
+          var filePath = first.path || '';
+          if (filePath) {
+            vm.applyDroppedPath(filePath);
+          }
+        }
+      });
+
+      // 注册来自 Python 后台原生 WinForms 拖拽通道的回调
+      window.__onNativeFileDrop = function (paths) {
+        if (paths && paths.length > 0) {
+          vm.applyDroppedPath(paths[0]);
+        }
+      };
     },
     beforeDestroy: function () {
       if (this.pollTimer) {
@@ -214,6 +256,32 @@
         vm.callApi('open_download_url', [vm.updateInfo.download_url]).then(function (result) {
           if (!result.ok) vm.showError(result);
         }).catch(vm.showError);
+      },
+      applyDroppedPath: function (path) {
+        var vm = this;
+        vm.callApi('handle_dropped_path', [path]).then(function (result) {
+          if (!result || !result.ok) {
+            vm.showError(result ? result.error : '无法识别拖拽的文件或目录路径。');
+            return;
+          }
+          if (result.type === 'dir') {
+            vm.workMode = 'dir';
+            vm.form.source_dir = result.path;
+            vm.form.target_dir = result.suggested_target_dir;
+            vm.$message.success('已载入输入图片目录：' + result.path);
+          } else if (result.type === 'pdf') {
+            vm.workMode = 'pdf';
+            vm.pdfForm.pdf_path = result.path;
+            vm.$message.success('已载入待处理 PDF 文件：' + result.path);
+          } else if (result.type === 'image') {
+            vm.workMode = 'dir';
+            vm.form.source_dir = result.parent_dir;
+            vm.form.target_dir = result.suggested_target_dir;
+            vm.$message.success('已载入图片所在目录：' + result.parent_dir);
+          }
+        }).catch(function (error) {
+          vm.showError(error);
+        });
       },
       selectDirectory: function (field) {
         var vm = this;

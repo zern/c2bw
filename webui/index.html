@@ -10,6 +10,15 @@
 </head>
 <body>
   <div id="app" v-cloak>
+    <!-- 拖拽提示遮罩 -->
+    <div v-if="isDragging" class="drag-drop-overlay">
+      <div class="drag-drop-box">
+        <i class="el-icon-upload"></i>
+        <div class="drag-drop-title">释放以载入路径</div>
+        <div class="drag-drop-subtitle">支持拖入图片目录、待处理 PDF 或图片文件</div>
+      </div>
+    </div>
+
     <header class="app-header">
       <div class="brand-mark"><i class="el-icon-reading"></i></div>
       <div class="brand-copy">
@@ -64,7 +73,7 @@
             <el-input
               v-model="form.source_dir"
               :disabled="processing"
-              placeholder="请选择需要处理的图片文件夹">
+              placeholder="请选择或直接拖入需要处理的图片文件夹">
             </el-input>
             <el-button
               :loading="directoryLoading === 'source_dir'"
@@ -78,7 +87,7 @@
             <el-input
               v-model="form.target_dir"
               :disabled="processing"
-              placeholder="默认在输入目录下创建 output 文件夹">
+              placeholder="默认在输入目录下创建 output 文件夹（亦可直接拖入自定义目录）">
             </el-input>
             <el-button
               :loading="directoryLoading === 'target_dir'"
@@ -102,7 +111,7 @@
             <el-input
               v-model="pdfForm.pdf_path"
               :disabled="processing"
-              placeholder="请选择需要处理的图片打包型 PDF 文件">
+              placeholder="请选择或直接拖入需要处理的图片型 PDF 文件">
             </el-input>
             <el-button
               :loading="directoryLoading === 'pdf_file'"
