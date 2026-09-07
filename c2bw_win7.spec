@@ -23,6 +23,7 @@ a = Analysis(
     hiddenimports=[
         'PIL.JpegImagePlugin',
         'PIL.PdfImagePlugin',
+        'PIL.Jpeg2KImagePlugin',
         'pypdf',
         'webview',
         'webview.platforms.winforms',

@@ -18,7 +18,7 @@ import json
 import webbrowser
 import urllib.request
 import numpy as np
-from PIL import Image, JpegImagePlugin, PdfImagePlugin  # 显式导入以确保打包程序包含 PDF 编码器。
+from PIL import Image, JpegImagePlugin, PdfImagePlugin, Jpeg2KImagePlugin  # 显式导入以确保打包程序包含 PDF/JPEG2000 编码器。
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     ArrayObject, NameObject, StreamObject,
