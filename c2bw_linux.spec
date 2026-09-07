@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""macOS 单文件构建配置。需在 macOS runner 上执行。"""
+"""Linux 单文件构建配置。需在 Linux runner 上执行。"""
 
 a = Analysis(
     ['c2bw.py'],
@@ -11,7 +11,7 @@ a = Analysis(
         'PIL.PdfImagePlugin',
         'pypdf',
         'webview',
-        'webview.platforms.cocoa',
+        'webview.platforms.gtk',
     ],
     hookspath=[],
     hooksconfig={},
@@ -36,7 +36,7 @@ exe = EXE(
     name='c2bw',
     debug=False,
     bootloader_ignore_signals=False,
-    strip=False,
+    strip=True,
     upx=False,
     console=False,
     disable_windowed_traceback=False,

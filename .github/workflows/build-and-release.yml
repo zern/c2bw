@@ -1,0 +1,214 @@
+name: Build and Release Multi-Platform Binaries
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Publish release with built binaries (true/false)'
+        required: false
+        default: 'false'
+        type: boolean
+  push:
+    branches: ['main']
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Windows x64 (Win10/11 & Win7)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # 1. 构建 Windows 10 / 11 标准版 (Python 3.11)
+      - name: Setup Python 3.11 for Windows 10/11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Build Windows 10/11 executable
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+          python -m PyInstaller --noconfirm --clean c2bw.spec
+          Copy-Item "dist/智能图像预处理工具 v3.3.exe" "dist/c2bw-windows-x64.exe" -Force
+          Copy-Item "dist/智能图像预处理工具 v3.3.exe" "dist/智能图像预处理工具_v3.3_Windows.exe" -Force
+
+      # 2. 构建 Windows 7 专用独立版 (Python 3.8 + pythonnet)
+      - name: Setup Python 3.8 for Windows 7
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.8'
+
+      - name: Build Windows 7 executable
+        shell: pwsh
+        run: |
+          python -m pip install --upgrade "pip<24.1" "setuptools<60.7" "wheel<0.46"
+          python -m pip install -r requirements-win7.txt
+          $dll = python -c "import os, pythonnet; print(os.path.join(os.path.dirname(pythonnet.__file__), 'runtime', 'Python.Runtime.dll'))"
+          if (Test-Path $dll) { Copy-Item $dll . -Force }
+          python -m PyInstaller --noconfirm --clean c2bw_win7.spec
+          if (Test-Path "Python.Runtime.dll") { Remove-Item "Python.Runtime.dll" -Force }
+          Copy-Item "dist/智能图像预处理工具 v3.3_Win7.exe" "dist/c2bw-windows7-x64.exe" -Force
+          Copy-Item "dist/智能图像预处理工具 v3.3_Win7.exe" "dist/智能图像预处理工具_v3.3_Windows7.exe" -Force
+
+      - name: Generate Windows Checksums
+        shell: pwsh
+        run: |
+          Get-FileHash -Algorithm SHA256 "dist/c2bw-windows-x64.exe" | ForEach-Object { "$($_.Hash.ToLower())  c2bw-windows-x64.exe" } | Out-File -Encoding utf8 "dist/c2bw-windows-x64.sha256"
+          Get-FileHash -Algorithm SHA256 "dist/c2bw-windows7-x64.exe" | ForEach-Object { "$($_.Hash.ToLower())  c2bw-windows7-x64.exe" } | Out-File -Encoding utf8 "dist/c2bw-windows7-x64.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: |
+            dist/c2bw-windows-x64.exe
+            dist/智能图像预处理工具_v3.3_Windows.exe
+            dist/c2bw-windows-x64.sha256
+            dist/c2bw-windows7-x64.exe
+            dist/智能图像预处理工具_v3.3_Windows7.exe
+            dist/c2bw-windows7-x64.sha256
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS ${{ matrix.arch }} (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            name: Intel
+            runner: macos-13
+          - arch: arm64
+            name: AppleSilicon
+            runner: macos-14
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt pyinstaller
+          python -m pip install pyobjc-core pyobjc-framework-Cocoa pyobjc-framework-WebKit
+
+      - name: Build macOS single-file executable
+        run: |
+          python -m PyInstaller --noconfirm --clean c2bw_macos.spec
+          cp dist/c2bw "dist/c2bw-macos-${{ matrix.arch }}"
+          cp dist/c2bw "dist/智能图像预处理工具_v3.3_macOS_${{ matrix.arch }}"
+          chmod +x "dist/c2bw-macos-${{ matrix.arch }}" "dist/智能图像预处理工具_v3.3_macOS_${{ matrix.arch }}"
+
+      - name: Verify architecture
+        run: |
+          file "dist/c2bw-macos-${{ matrix.arch }}"
+          test -x "dist/c2bw-macos-${{ matrix.arch }}"
+
+      - name: Generate checksum
+        run: |
+          shasum -a 256 "dist/c2bw-macos-${{ matrix.arch }}" > "dist/c2bw-macos-${{ matrix.arch }}.sha256"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}-binary
+          path: |
+            dist/c2bw-macos-${{ matrix.arch }}
+            dist/智能图像预处理工具_v3.3_macOS_${{ matrix.arch }}
+            dist/c2bw-macos-${{ matrix.arch }}.sha256
+          if-no-files-found: error
+
+  build-linux:
+    name: Linux x64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies (WebKitGTK & PyGObject)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgirepository1.0-dev \
+            libcairo2-dev \
+            pkg-config \
+            python3-dev \
+            gir1.2-gtk-3.0 \
+            gir1.2-webkit2-4.0
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install PyGObject
+          python -m pip install -r requirements.txt pyinstaller
+
+      - name: Build Linux single-file executable
+        run: |
+          python -m PyInstaller --noconfirm --clean c2bw_linux.spec
+          cp dist/c2bw dist/c2bw-linux-x64
+          cp dist/c2bw dist/智能图像预处理工具_v3.3_Linux_x64
+          chmod +x dist/c2bw-linux-x64 dist/智能图像预处理工具_v3.3_Linux_x64
+
+      - name: Verify executable
+        run: |
+          file dist/c2bw-linux-x64
+          test -x dist/c2bw-linux-x64
+
+      - name: Generate checksum
+        run: |
+          sha256sum dist/c2bw-linux-x64 > dist/c2bw-linux-x64.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-binary
+          path: |
+            dist/c2bw-linux-x64
+            dist/智能图像预处理工具_v3.3_Linux_x64
+            dist/c2bw-linux-x64.sha256
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.create_release == true)
+    needs: [build-windows, build-macos, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Organize release assets & compute combined checksums
+        shell: bash
+        run: |
+          mkdir -p release-dist
+          # 复制所有二进制与单独校验文件
+          find release-artifacts -type f \( -name "*.exe" -o -name "c2bw-*" -o -name "智能图像预处理工具_*" \) -exec cp {} release-dist/ \;
+          # 生成源码 zip 包
+          git archive --format=zip --output=release-dist/c2bw-source.zip HEAD
+          # 汇总计算完整的 SHA256SUMS 清单
+          cd release-dist
+          sha256sum * > SHA256SUMS.txt
+          ls -lh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-dist/*
+          generate_release_notes: true

@@ -53,10 +53,14 @@ webui/                  Vue 2 + Element UI 现代化前端资源
   vendor/               Vue、Element UI 和字体等离线依赖资源
 c2bw.spec               Windows 10/11 标准打包配置
 c2bw_win7.spec         Windows 7 专用独立版打包配置
+c2bw_macos.spec        macOS (Intel & Apple Silicon) 单文件打包配置
+c2bw_linux.spec        Linux (x64) 单文件打包配置
 build_win7.bat         Windows 7 一键自动化构建脚本
 requirements.txt       标准运行依赖
 requirements-win7.txt  Windows 7 兼容构建依赖
 version_info.txt       Windows 可执行文件版本元数据
+.github/workflows/     GitHub Actions 自动化构建与发布工作流
+  build-and-release.yml 多平台单文件 CI/CD 工作流
 ```
 
 ---
@@ -132,35 +136,37 @@ del Python.Runtime.dll
 
 ---
 
-## 五、Linux / macOS 编译
+## 五、跨平台单文件构建与 GitHub Actions CI/CD
 
-PyInstaller 不支持跨平台交叉编译，请在对应系统中进行构建。
+本项目配置了完整的 GitHub Actions 自动化持续集成与发布流水线（`.github/workflows/build-and-release.yml`），原生支持跨平台自动化构建无依赖单文件：
 
-### Linux：
+### 1. 预编译单文件下载 (GitHub Releases)
+- **Windows 10 / 11 (x64)**：`c2bw-windows-x64.exe`
+- **Windows 7 独立版 (x64)**：`c2bw-windows7-x64.exe` (内嵌 .NET 运行时)
+- **macOS Intel (x86_64)**：`c2bw-macos-x86_64` (适配 Intel 处理器 Mac)
+- **macOS Apple Silicon (arm64)**：`c2bw-macos-arm64` (适配 M1/M2/M3/M4 芯片 Mac)
+- **Linux (x64)**：`c2bw-linux-x64` (适配主流 Linux 发行版，glibc >= 2.35)
 
+> **触发机制**：
+> - **自动发布**：向仓库推送版本标签（如 `git tag v3.3 && git push origin v3.3`）时，自动触发全平台并行编译并直接创建 GitHub Release 附带全部二进制文件及 `SHA256SUMS.txt` 校验清单；
+> - **手动触发**：亦可在 GitHub 仓库的 `Actions` 页面选择 `Build and Release Multi-Platform Binaries` 手动一键运行测试。
+
+### 2. 本地手工构建命令
+
+#### Linux：
 ```bash
-python3 -m venv .venv-build
-source .venv-build/bin/activate
-python -m pip install -r requirements.txt pyinstaller
-python -m PyInstaller --noconfirm --clean --onefile --windowed \
-  --name c2bw \
-  --add-data "webui:webui" \
-  c2bw.py
-chmod +x dist/c2bw
-./dist/c2bw
+sudo apt-get install -y libgirepository1.0-dev libcairo2-dev gir1.2-gtk-3.0 gir1.2-webkit2-4.0
+python3 -m venv .venv-build && source .venv-build/bin/activate
+python -m pip install PyGObject -r requirements.txt pyinstaller
+python -m PyInstaller --noconfirm --clean c2bw_linux.spec
 ```
-*注：Linux 下需保证系统安装有 WebKitGTK 运行环境。*
 
-### macOS：
-
+#### macOS (Intel / Apple Silicon)：
 ```bash
-python3 -m venv .venv-build
-source .venv-build/bin/activate
+python3 -m venv .venv-build && source .venv-build/bin/activate
 python -m pip install -r requirements.txt pyinstaller
-python -m PyInstaller --noconfirm --clean --onefile --windowed \
-  --name c2bw \
-  --add-data "webui:webui" \
-  c2bw.py
+python -m pip install pyobjc-core pyobjc-framework-Cocoa pyobjc-framework-WebKit
+python -m PyInstaller --noconfirm --clean c2bw_macos.spec
 ```
 
 ---
