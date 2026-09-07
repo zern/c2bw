@@ -126,14 +126,7 @@
     },
     created: function () {
       var vm = this;
-      window.__onNativeDragEnter = function () {
-        vm.isDragging = true;
-      };
-      window.__onNativeDragLeave = function () {
-        vm.isDragging = false;
-      };
       window.__onNativeFileDrop = function (paths) {
-        vm.isDragging = false;
         if (paths && paths.length > 0) {
           vm.applyDroppedPath(paths[0]);
         }
@@ -193,29 +186,43 @@
         vm.isDragging = false;
         var dt = e.dataTransfer;
         if (!dt) return;
-        var files = dt.files;
-        if (files && files.length > 0) {
-          var first = files[0];
-          var filePath = first.path || '';
-          if (filePath) {
-            vm.applyDroppedPath(filePath);
+
+        var droppedPath = '';
+        var droppedName = '';
+
+        if (dt.files && dt.files.length > 0) {
+          var first = dt.files[0];
+          droppedPath = first.path || '';
+          droppedName = first.name || '';
+        }
+
+        if (!droppedName && dt.items && dt.items.length > 0) {
+          for (var i = 0; i < dt.items.length; i++) {
+            var item = dt.items[i];
+            if (item.kind === 'file') {
+              if (item.getAsFile) {
+                var f = item.getAsFile();
+                if (f) {
+                  droppedPath = droppedPath || f.path || '';
+                  droppedName = droppedName || f.name || '';
+                }
+              }
+              if (!droppedName && item.webkitGetAsEntry) {
+                var entry = item.webkitGetAsEntry();
+                if (entry && entry.name) {
+                  droppedName = entry.name;
+                }
+              }
+              if (droppedPath || droppedName) break;
+            }
           }
         }
-      });
 
-      // 注册来自 Python 后台原生 WinForms / WebView2 拖拽通道的回调
-      window.__onNativeDragEnter = function () {
-        vm.isDragging = true;
-      };
-      window.__onNativeDragLeave = function () {
-        vm.isDragging = false;
-      };
-      window.__onNativeFileDrop = function (paths) {
-        vm.isDragging = false;
-        if (paths && paths.length > 0) {
-          vm.applyDroppedPath(paths[0]);
+        var target = droppedPath || droppedName;
+        if (target) {
+          vm.applyDroppedPath(target);
         }
-      };
+      });
     },
     beforeDestroy: function () {
       if (this.pollTimer) {

@@ -2555,43 +2555,119 @@ class WebImageProcessorService(ImageProcessorApp):
         except Exception as e:
             return {'ok': False, 'error': str(e)}
 
+    def _resolve_system_dropped_path(self, raw_input):
+        """若仅拖入文件名或受沙箱保护的相对标识，尝试在系统资源管理器、桌面或常用目录中解析绝对路径。"""
+        if not raw_input:
+            return ''
+        raw_input = str(raw_input).strip().strip('"').strip("'")
+        if not raw_input:
+            return ''
+        if os.path.exists(raw_input):
+            return os.path.abspath(raw_input)
+
+        name = os.path.basename(raw_input) if ('/' in raw_input or '\\' in raw_input) else raw_input
+        name_lower = name.lower()
+
+        # 1. Windows 环境：遍历系统资源管理器窗口，寻找选中项或同名文件/目录
+        if sys.platform == 'win32':
+            com_initialized = False
+            try:
+                import pythoncom
+                pythoncom.CoInitialize()
+                com_initialized = True
+            except Exception:
+                pass
+
+            try:
+                import win32com.client
+                shell = win32com.client.Dispatch("Shell.Application")
+                windows = shell.Windows()
+                # 优先匹配资源管理器窗口当前选中的项目
+                for w in windows:
+                    try:
+                        doc = w.Document
+                        sel = doc.SelectedItems()
+                        for i in range(sel.Count):
+                            item_path = sel.Item(i).Path
+                            if os.path.basename(item_path).lower() == name_lower:
+                                if os.path.exists(item_path):
+                                    return os.path.abspath(item_path)
+                    except Exception:
+                        pass
+
+                # 其次匹配已打开的资源管理器目录下的同名文件/目录
+                for w in windows:
+                    try:
+                        doc = w.Document
+                        folder_path = doc.Folder.Self.Path
+                        candidate = os.path.join(folder_path, name)
+                        if os.path.exists(candidate):
+                            return os.path.abspath(candidate)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            finally:
+                if com_initialized:
+                    try:
+                        pythoncom.CoUninitialize()
+                    except Exception:
+                        pass
+
+        # 2. 检查常见系统目录：桌面、下载、文档、公用桌面、程序当前工作目录
+        candidates = []
+        user_home = os.path.expanduser('~')
+        candidates.append(os.path.join(user_home, 'Desktop'))
+        candidates.append(os.path.join(user_home, 'Downloads'))
+        candidates.append(os.path.join(user_home, 'Documents'))
+        public_dir = os.environ.get('PUBLIC', 'C:\\Users\\Public')
+        candidates.append(os.path.join(public_dir, 'Desktop'))
+        candidates.append(os.getcwd())
+
+        for base in candidates:
+            if base:
+                candidate = os.path.join(base, name)
+                if os.path.exists(candidate):
+                    return os.path.abspath(candidate)
+
+        return raw_input
+
     def handle_dropped_path(self, path):
         """解析拖拽到窗口的文件或目录路径，识别类型并返回建议的表单设定。"""
-        path = str(path or '').strip().strip('"').strip("'")
-        if not path:
-            return {'ok': False, 'error': '拖拽路径为空。'}
-        if not os.path.exists(path):
-            return {'ok': False, 'error': f'拖拽的路径不存在或不可访问：{path}'}
+        resolved_path = self._resolve_system_dropped_path(path)
+        if not resolved_path or not os.path.exists(resolved_path):
+            raw_display = str(path or '').strip()
+            return {'ok': False, 'error': f'未能识别或访问拖拽的路径：{raw_display}'}
 
-        path = os.path.abspath(path)
-        if os.path.isdir(path):
-            suggested_target = os.path.join(path, 'output')
+        resolved_path = os.path.abspath(resolved_path)
+        if os.path.isdir(resolved_path):
+            suggested_target = os.path.join(resolved_path, 'output')
             return {
                 'ok': True,
                 'type': 'dir',
-                'path': path,
+                'path': resolved_path,
                 'suggested_target_dir': suggested_target,
             }
 
-        if os.path.isfile(path):
-            ext = os.path.splitext(path)[1].lower()
+        if os.path.isfile(resolved_path):
+            ext = os.path.splitext(resolved_path)[1].lower()
             if ext == '.pdf':
-                pdf_dir = os.path.dirname(path)
-                pdf_name = os.path.splitext(os.path.basename(path))[0]
+                pdf_dir = os.path.dirname(resolved_path)
+                pdf_name = os.path.splitext(os.path.basename(resolved_path))[0]
                 return {
                     'ok': True,
                     'type': 'pdf',
-                    'path': path,
+                    'path': resolved_path,
                     'pdf_dir': pdf_dir,
                     'pdf_name': pdf_name,
                 }
             elif ext in ('.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2'):
-                parent_dir = os.path.dirname(path)
+                parent_dir = os.path.dirname(resolved_path)
                 suggested_target = os.path.join(parent_dir, 'output')
                 return {
                     'ok': True,
                     'type': 'image',
-                    'path': path,
+                    'path': resolved_path,
                     'parent_dir': parent_dir,
                     'suggested_target_dir': suggested_target,
                 }
@@ -3105,89 +3181,6 @@ def launch_web_ui():
         bridge.poll_events,
         bridge.open_output_folder,
     )
-
-    def _enable_native_winforms_drop():
-        if sys.platform != 'win32':
-            return
-        try:
-            import clr
-            clr.AddReference('System.Windows.Forms')
-            import System.Windows.Forms as WinForms
-
-            wired_controls = set()
-
-            def _wire_control(ctrl):
-                if ctrl is None:
-                    return
-                try:
-                    ctrl_id = ctrl.Handle.ToInt64() if hasattr(ctrl, 'Handle') else id(ctrl)
-                    if ctrl_id in wired_controls:
-                        return
-                    wired_controls.add(ctrl_id)
-
-                    if hasattr(ctrl, 'AllowExternalDrop'):
-                        ctrl.AllowExternalDrop = False
-                    ctrl.AllowDrop = True
-
-                    none_effect = getattr(WinForms.DragDropEffects, 'None')
-
-                    def _on_drag_enter(sender, e):
-                        if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
-                            e.Effect = WinForms.DragDropEffects.Copy
-                            window.evaluate_js("window.__onNativeDragEnter && window.__onNativeDragEnter()")
-                        else:
-                            e.Effect = none_effect
-
-                    def _on_drag_over(sender, e):
-                        if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
-                            e.Effect = WinForms.DragDropEffects.Copy
-                        else:
-                            e.Effect = none_effect
-
-                    def _on_drag_leave(sender, e):
-                        window.evaluate_js("window.__onNativeDragLeave && window.__onNativeDragLeave()")
-
-                    def _on_drag_drop(sender, e):
-                        window.evaluate_js("window.__onNativeDragLeave && window.__onNativeDragLeave()")
-                        if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
-                            raw_files = e.Data.GetData(WinForms.DataFormats.FileDrop)
-                            files = [str(f) for f in raw_files] if raw_files else []
-                            if files:
-                                window.evaluate_js(
-                                    f"window.__onNativeFileDrop && window.__onNativeFileDrop({json.dumps(files)})"
-                                )
-
-                    ctrl.DragEnter += _on_drag_enter
-                    ctrl.DragOver += _on_drag_over
-                    ctrl.DragLeave += _on_drag_leave
-                    ctrl.DragDrop += _on_drag_drop
-                except Exception:
-                    pass
-
-                if hasattr(ctrl, 'Controls'):
-                    for child in ctrl.Controls:
-                        _wire_control(child)
-
-            for form in list(WinForms.Application.OpenForms):
-                _wire_control(form)
-                if hasattr(form, 'browser') and hasattr(form.browser, 'web_view'):
-                    _wire_control(form.browser.web_view)
-                    try:
-                        def _on_webview_ready(sender, args):
-                            try:
-                                sender.AllowExternalDrop = False
-                                sender.AllowDrop = True
-                            except Exception:
-                                pass
-                        form.browser.web_view.CoreWebView2InitializationCompleted += _on_webview_ready
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-
-    window.events.shown += _enable_native_winforms_drop
-    window.events.loaded += _enable_native_winforms_drop
-
     # Win7 没有 WebView2，使用系统 IE11/MSHTML；新系统优先使用 WebView2。
     legacy_windows = sys.platform == 'win32' and sys.getwindowsversion().major <= 6
     webview.start(
