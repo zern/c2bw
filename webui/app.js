@@ -365,6 +365,17 @@
         }
 
         // 图片目录模式
+        if (!vm.form.source_dir) {
+          vm.showError('请先选择输入图片目录！');
+          return;
+        }
+        if (!vm.form.enable_crop && !vm.form.enable_binarize) {
+          if (vm.form.non_bin_format === 'keep' && !vm.form.enable_pdf) {
+            vm.showError('请至少启用一种处理任务（色彩处理或分页裁切），或选择转为 JPG，或勾选合并输出为 PDF！');
+            return;
+          }
+        }
+
         vm.callApi('start_processing', [vm.form]).then(function (result) {
           if (!result.ok) {
             vm.showError(result);

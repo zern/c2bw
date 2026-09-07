@@ -363,12 +363,18 @@
               完成后合并输出为 PDF
             </el-checkbox>
             <el-checkbox
-              v-if="form.enable_pdf"
+              v-if="form.enable_pdf && (form.enable_crop || form.enable_binarize || form.non_bin_format === 'jpg80')"
               v-model="form.keep_images_after_pdf"
               :disabled="processing"
               style="margin-left: 15px;">
               合成PDF后保留处理后的图片
             </el-checkbox>
+            <el-tag v-if="form.enable_pdf && !form.enable_crop && !form.enable_binarize && form.non_bin_format === 'keep'" size="small" type="success" effect="plain" style="margin-left: 10px;">
+              <i class="el-icon-check"></i> 保持原图品质，直接打包为 PDF
+            </el-tag>
+            <el-tag v-else-if="form.enable_pdf && !form.enable_crop && !form.enable_binarize && form.non_bin_format === 'jpg80'" size="small" type="warning" effect="plain" style="margin-left: 10px;">
+              <i class="el-icon-picture-outline"></i> 先转换为 JPG(质量80) 再打包为 PDF
+            </el-tag>
           </template>
           <template v-else>
             <el-checkbox v-model="pdfForm.no_convert_pdf" :disabled="processing">

@@ -1127,6 +1127,10 @@ class ImageProcessorApp:
         if not 1 <= settings['max_threads'] <= 64:
             messagebox.showwarning("线程数无效", "最大线程数必须在 1 到 64 之间。")
             return None
+        if not settings['enable_binarize'] and not settings['enable_crop']:
+            if settings['non_bin_format'] == 'keep' and not settings['enable_pdf']:
+                messagebox.showwarning("操作无效", "请至少启用一种处理任务（色彩处理或分页裁切），或选择转为 JPG，或勾选合并输出为 PDF！")
+                return None
         if settings['enable_binarize'] and not 0 <= settings['threshold_val'] <= 100:
             messagebox.showwarning("阈值无效", "自定义阈值必须在 0 到 100 之间。")
             return None
@@ -1141,9 +1145,14 @@ class ImageProcessorApp:
     def start_processing(self):
         if self.is_processing: return
         if not self.enable_binarize.get() and not self.enable_crop.get():
-            if not (self.work_mode.get() == "pdf" and self.pdf_no_convert.get()):
-                messagebox.showwarning("操作无效", "请至少勾选一种处理任务（裁切或黑白二值化）！")
-                return
+            if self.work_mode.get() == "pdf":
+                if not self.pdf_no_convert.get():
+                    messagebox.showwarning("操作无效", "请至少勾选一种处理任务（裁切或黑白二值化）！")
+                    return
+            else:
+                if self.non_bin_format.get() == 'keep' and not self.enable_pdf.get():
+                    messagebox.showwarning("操作无效", "请至少启用一种处理任务（色彩处理或分页裁切），或选择转为 JPG，或勾选合并输出为 PDF！")
+                    return
 
         if self.work_mode.get() == "pdf":
             pdf_path = self.pdf_file_path.get().strip()
@@ -1639,7 +1648,9 @@ class ImageProcessorApp:
             else:
                 lines.append("- PDF 输出: 合并为新 PDF 并自动清理临时分页图片")
         else:
-            if pdf_count is not None or settings.get('enable_pdf'):
+            if summary.get('direct_pdf'):
+                lines.append("- PDF 输出: 直接打包为 PDF (保持原图格式与品质，无中间图片)")
+            elif pdf_count is not None or settings.get('enable_pdf'):
                 keep_img = "保留处理后的图片" if settings.get('keep_images_after_pdf', keep_images) else "转换为PDF后自动清理图片"
                 lines.append(f"- PDF 输出: 合并输出为单个 PDF ({keep_img})")
             else:
@@ -1663,7 +1674,10 @@ class ImageProcessorApp:
         if settings.get('enable_crop'):
             lines.append(f"- 转换后的图片总量: {total_output} 张 (其中排除单页数量: {excluded_single} 张，裁切双页数量: {cropped_double} 张 -> 分割生成 {cropped_double * 2} 张)")
         else:
-            lines.append(f"- 转换后的图片总量: {total_output} 张 (未启用裁切，全为单页)")
+            if summary.get('direct_pdf'):
+                lines.append(f"- 打包图片总量: {total_output} 张 (未启用裁切，全为单页)")
+            else:
+                lines.append(f"- 转换后的图片总量: {total_output} 张 (未启用裁切，全为单页)")
 
         succeeded = summary.get('succeeded', 0)
         total_tasks = summary.get('total', total_input)
@@ -1688,7 +1702,9 @@ class ImageProcessorApp:
         if pdf_error:
             lines.append(f"- PDF 生成异常: {pdf_error}")
 
-        if summary.get('images_kept', True) and (not is_pdf_mode or settings.get('no_convert_pdf') or settings.get('keep_images_after_pdf', keep_images)):
+        if summary.get('direct_pdf'):
+            lines.append("- 处理图片文件: 保持原图品质未做修改，直接打包为 PDF")
+        elif summary.get('images_kept', True) and (not is_pdf_mode or settings.get('no_convert_pdf') or settings.get('keep_images_after_pdf', keep_images)):
             target_out = (settings.get('clean_dir') or settings.get('source_dir', '')) if is_pdf_mode else (settings.get('target_dir', ''))
             lines.append(f"- 处理图片输出目录: {target_out}")
         else:
@@ -2035,7 +2051,139 @@ class ImageProcessorApp:
             summary_msg = self._build_and_save_task_report(summary, settings['target_dir'])
             self._finish_processing(summary_msg)
 
+    def _run_direct_image_to_pdf_task(self, settings):
+        """当不选择色彩处理和分页处理，保持原格式与品质且勾选合并为PDF时，直接将输入目录的图片打包为PDF。"""
+        src_dir = settings['source_dir']
+        tgt_dir = settings['target_dir']
+        include_subfolders = settings.get('include_subfolders', False)
+        valid_exts = {'.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2'}
+
+        try:
+            os.makedirs(tgt_dir, exist_ok=True)
+        except OSError as e:
+            self.ui_events.put(('finish', f"创建输出目录失败：{str(e)}"))
+            return
+
+        images_by_dir = {}
+        tgt_abs = os.path.normcase(os.path.realpath(tgt_dir))
+
+        if include_subfolders:
+            for root, dirs, files in os.walk(src_dir):
+                dirs[:] = [
+                    d for d in dirs
+                    if os.path.normcase(os.path.realpath(os.path.join(root, d))) != tgt_abs
+                ]
+                for file in files:
+                    if os.path.splitext(file)[1].lower() in valid_exts:
+                        images_by_dir.setdefault(root, []).append(os.path.join(root, file))
+        else:
+            if os.path.exists(src_dir):
+                for file in os.listdir(src_dir):
+                    full_path = os.path.join(src_dir, file)
+                    if os.path.isfile(full_path) and os.path.splitext(file)[1].lower() in valid_exts:
+                        images_by_dir.setdefault(src_dir, []).append(full_path)
+
+        total_files = sum(len(paths) for paths in images_by_dir.values())
+        if total_files == 0:
+            self.ui_events.put(('finish', "未找到符合条件的图片文件！"))
+            return
+
+        group_targets = []
+        if include_subfolders:
+            sorted_dirs = sorted(
+                images_by_dir.items(),
+                key=lambda item: self._natural_sort_key(
+                    os.path.relpath(item[0], src_dir)
+                ),
+            )
+            for dir_path, image_paths in sorted_dirs:
+                image_paths.sort(
+                    key=lambda path: self._natural_sort_key(
+                        os.path.relpath(path, dir_path)
+                    )
+                )
+                rel_dir = os.path.relpath(dir_path, src_dir)
+                if rel_dir == '.' or not rel_dir:
+                    folder_name = os.path.basename(os.path.normpath(src_dir)) or 'output'
+                    pdf_path = os.path.join(tgt_dir, f"{folder_name}.pdf")
+                else:
+                    folder_name = os.path.basename(os.path.normpath(dir_path))
+                    rel_parent = os.path.dirname(rel_dir)
+                    pdf_parent_dir = os.path.join(tgt_dir, rel_parent) if rel_parent else tgt_dir
+                    os.makedirs(pdf_parent_dir, exist_ok=True)
+                    pdf_path = os.path.join(pdf_parent_dir, f"{folder_name}.pdf")
+                group_targets.append((dir_path, image_paths, pdf_path))
+        else:
+            all_images = [p for paths in images_by_dir.values() for p in paths]
+            all_images.sort(key=lambda path: self._natural_sort_key(os.path.relpath(path, src_dir)))
+            folder_name = os.path.basename(os.path.normpath(src_dir)) or 'output'
+            pdf_path = os.path.join(tgt_dir, f"{folder_name}.pdf")
+            group_targets.append((src_dir, all_images, pdf_path))
+
+        pdf_total = sum(len(paths) for _, paths, _ in group_targets)
+        pdf_done = 0
+        generated_pdfs = []
+        self.ui_events.put(('status', '正在直接打包 PDF（保持原图品质）...'))
+
+        for dir_path, image_paths, pdf_path in group_targets:
+            if self.cancel_event.is_set():
+                self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir)))
+                return
+
+            pdf_name = os.path.basename(pdf_path)
+            self.ui_events.put(('status', f"正在直接打包 PDF: {pdf_name}..."))
+            success, result = self._build_single_pdf(
+                image_paths, pdf_path, settings,
+                progress_state=[pdf_done, pdf_total],
+            )
+            pdf_done = min(pdf_total, pdf_done + len(image_paths))
+
+            if self.cancel_event.is_set():
+                self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir)))
+                return
+
+            if not success:
+                for g_pdf in generated_pdfs:
+                    try:
+                        os.remove(g_pdf)
+                    except OSError:
+                        pass
+                self.ui_events.put(('finish', f"生成 PDF 失败：{result}"))
+                return
+            generated_pdfs.append(result)
+
+        summary = {
+            'settings': settings,
+            'total_input': total_files,
+            'total': total_files,
+            'succeeded': total_files,
+            'total_output_images': total_files,
+            'excluded_single_count': total_files,
+            'cropped_double_count': 0,
+            'errors': [],
+            'collision_groups': 0,
+            'images_kept': True,
+            'direct_pdf': True,
+        }
+        summary_msg = self._build_and_save_task_report(
+            summary,
+            tgt_dir,
+            pdf_count=len(generated_pdfs),
+            pdf_path=generated_pdfs[0] if len(generated_pdfs) == 1 else None,
+            keep_images=True,
+        )
+        self.ui_events.put(('finish', summary_msg))
+
     def _run_task(self, settings):
+        if (
+            not settings.get('enable_binarize')
+            and not settings.get('enable_crop')
+            and settings.get('non_bin_format') == 'keep'
+            and settings.get('enable_pdf')
+        ):
+            self._run_direct_image_to_pdf_task(settings)
+            return
+
         src_dir = settings['source_dir']
         tgt_dir = settings['target_dir']
         include_subfolders = settings['include_subfolders']
@@ -2399,7 +2547,8 @@ class WebImageProcessorService(ImageProcessorApp):
         if os.path.isdir(settings['target_dir']) and os.listdir(settings['target_dir']):
             return None, '为避免覆盖已有文件，请选择一个不存在或空的输出目录。'
         if not settings['enable_binarize'] and not settings['enable_crop']:
-            return None, '请至少启用一种处理任务。'
+            if settings['non_bin_format'] == 'keep' and not settings['enable_pdf']:
+                return None, '请至少启用一种处理任务（色彩处理或分页裁切），或选择转为 JPG，或勾选合并输出为 PDF。'
         if settings['bin_method'] not in ('0', '1'):
             return None, '二值化方式无效。'
         if settings['non_bin_format'] not in ('keep', 'jpg80'):
