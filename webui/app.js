@@ -124,6 +124,21 @@
         }
       }
     },
+    created: function () {
+      var vm = this;
+      window.__onNativeDragEnter = function () {
+        vm.isDragging = true;
+      };
+      window.__onNativeDragLeave = function () {
+        vm.isDragging = false;
+      };
+      window.__onNativeFileDrop = function (paths) {
+        vm.isDragging = false;
+        if (paths && paths.length > 0) {
+          vm.applyDroppedPath(paths[0]);
+        }
+      };
+    },
     mounted: function () {
       var vm = this;
       function connectBridge() {
@@ -188,8 +203,15 @@
         }
       });
 
-      // 注册来自 Python 后台原生 WinForms 拖拽通道的回调
+      // 注册来自 Python 后台原生 WinForms / WebView2 拖拽通道的回调
+      window.__onNativeDragEnter = function () {
+        vm.isDragging = true;
+      };
+      window.__onNativeDragLeave = function () {
+        vm.isDragging = false;
+      };
       window.__onNativeFileDrop = function (paths) {
+        vm.isDragging = false;
         if (paths && paths.length > 0) {
           vm.applyDroppedPath(paths[0]);
         }

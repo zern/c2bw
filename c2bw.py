@@ -944,7 +944,31 @@ class ImageProcessorApp:
         return None
 
     @staticmethod
-    def _get_jpeg_save_options(source_img):
+    def _get_normalized_dpi(pil_img, default_res=300.0):
+        """
+        获取图片的有效 DPI。
+        若源图无 DPI 属性、为 1（无单位缺省值）或 <= 10.0，统一自动规范化为 default_res (300.0, 300.0)。
+        """
+        dpi_val = pil_img.info.get('dpi') if hasattr(pil_img, 'info') else None
+        if not dpi_val:
+            return (default_res, default_res)
+        if isinstance(dpi_val, (tuple, list)):
+            try:
+                dx = float(dpi_val[0]) if dpi_val[0] else default_res
+                dy = float(dpi_val[1]) if len(dpi_val) > 1 and dpi_val[1] else dx
+                if dx <= 10.0 or dy <= 10.0:
+                    return (default_res, default_res)
+                return (round(dx, 2), round(dy, 2))
+            except (ValueError, TypeError):
+                return (default_res, default_res)
+        try:
+            num = float(dpi_val)
+            return (round(num, 2), round(num, 2)) if num > 10.0 else (default_res, default_res)
+        except (ValueError, TypeError):
+            return (default_res, default_res)
+
+    @classmethod
+    def _get_jpeg_save_options(cls, source_img):
         """尽量保留源 JPEG 的量化表和色度抽样，避免裁切后默认变成质量 95。"""
         quantization = getattr(source_img, 'quantization', None)
         if not quantization:
@@ -954,8 +978,7 @@ class ImageProcessorApp:
         subsampling = JpegImagePlugin.get_sampling(source_img)
         if subsampling != -1:
             options['subsampling'] = subsampling
-        if 'dpi' in source_img.info:
-            options['dpi'] = source_img.info['dpi']
+        options['dpi'] = cls._get_normalized_dpi(source_img, default_res=300.0)
         if 'icc_profile' in source_img.info:
             options['icc_profile'] = source_img.info['icc_profile']
         return options
@@ -990,6 +1013,8 @@ class ImageProcessorApp:
 
     def save_image(self, pil_img, out_path_base, original_ext, settings, jpeg_save_options=None):
         """保存一张处理结果，并返回最终输出路径。"""
+        norm_dpi = self._get_normalized_dpi(pil_img, default_res=300.0)
+
         if settings['enable_binarize']:
             gray_img = None
             final_img = None
@@ -1005,19 +1030,7 @@ class ImageProcessorApp:
                 binary_array = (img_array > t_val).astype(np.uint8) * 255
                 final_img = Image.fromarray(binary_array).convert('1')
                 output_path = f"{out_path_base}.tif"
-                save_kwargs = {'compression': 'group4'}
-
-                # 提取并确保写入合理的 DPI（源图无有效 DPI 或 JP2 缺省时使用 300 DPI，防止生成 1 DPI 的超大 PDF 页面）
-                dpi_val = pil_img.info.get('dpi') if hasattr(pil_img, 'info') else None
-                if not dpi_val or (isinstance(dpi_val, (tuple, list)) and (not dpi_val[0] or float(dpi_val[0]) <= 10.0)):
-                    dpi_val = (300.0, 300.0)
-                elif not isinstance(dpi_val, (tuple, list)):
-                    try:
-                        dpi_num = float(dpi_val)
-                        dpi_val = (dpi_num, dpi_num) if dpi_num > 10.0 else (300.0, 300.0)
-                    except (ValueError, TypeError):
-                        dpi_val = (300.0, 300.0)
-                save_kwargs['dpi'] = (float(dpi_val[0]), float(dpi_val[1]))
+                save_kwargs = {'compression': 'group4', 'dpi': norm_dpi}
 
                 self._save_image_atomically(
                     final_img,
@@ -1037,7 +1050,7 @@ class ImageProcessorApp:
             rgb_img = pil_img.convert('RGB') if pil_img.mode in ('RGBA', 'P', 'LA') else pil_img
             try:
                 output_path = f"{out_path_base}.jpg"
-                self._save_image_atomically(rgb_img, output_path, 'JPEG', quality=80)
+                self._save_image_atomically(rgb_img, output_path, 'JPEG', quality=80, dpi=norm_dpi)
                 return output_path
             finally:
                 if rgb_img is not pil_img:
@@ -1050,7 +1063,8 @@ class ImageProcessorApp:
             '.bmp': 'BMP', '.jp2': 'JPEG2000',
         }
         if original_ext in ('.jpg', '.jpeg'):
-            options = jpeg_save_options or {}
+            options = dict(jpeg_save_options or {})
+            options['dpi'] = norm_dpi
             try:
                 self._save_image_atomically(pil_img, output_path, 'JPEG', **options)
             except OSError:
@@ -1061,12 +1075,15 @@ class ImageProcessorApp:
                     converted.close()
         else:
             image_format = format_by_extension[original_ext]
+            save_opts = {}
+            if image_format in ('PNG', 'TIFF', 'BMP'):
+                save_opts['dpi'] = norm_dpi
             try:
-                self._save_image_atomically(pil_img, output_path, image_format)
+                self._save_image_atomically(pil_img, output_path, image_format, **save_opts)
             except OSError:
                 converted = pil_img.convert('RGB')
                 try:
-                    self._save_image_atomically(converted, output_path, image_format)
+                    self._save_image_atomically(converted, output_path, image_format, **save_opts)
                 finally:
                     converted.close()
         return output_path
@@ -1107,6 +1124,10 @@ class ImageProcessorApp:
                 jp2_dpi = self._parse_jp2_dpi(src_path)
                 if jp2_dpi:
                     img.info['dpi'] = jp2_dpi
+
+            # 统一规范化所有格式图片的 DPI（缺失或 <= 10 时缺省自动规范化为 300 DPI）
+            norm_dpi = self._get_normalized_dpi(img, default_res=300.0)
+            img.info['dpi'] = norm_dpi
             w, h = img.size 
             
             if h <= 0:
@@ -1162,6 +1183,7 @@ class ImageProcessorApp:
 
             for crop_box, crop_base_name in crop_jobs:
                 cropped_img = img.crop(crop_box)
+                cropped_img.info['dpi'] = norm_dpi
                 try:
                     output_paths.append(self.save_image(
                         cropped_img,
@@ -1928,16 +1950,15 @@ class ImageProcessorApp:
         """将一张图片以最优且标准合规的流格式加入 PDF（1 位二值图使用 CCITT Group 4，彩色图使用 DCT/JPEG）。"""
         with Image.open(image_path) as im:
             w, h = im.size
-            dpi = im.info.get('dpi', (default_res, default_res))
-            if isinstance(dpi, (tuple, list)):
-                dpi_x = float(dpi[0] or default_res)
-                dpi_y = float(dpi[1] or default_res)
-            else:
-                dpi_x = dpi_y = float(dpi or default_res)
-            # 如果 DPI 缺失、为 1（TIFF 无单位缺省值）或 <= 10，自动使用合理的 default_res（300 DPI）
-            if dpi_x <= 10.0 or dpi_y <= 10.0:
-                dpi_x = default_res
-                dpi_y = default_res
+            ext = os.path.splitext(image_path)[1].lower()
+            if ext in ('.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c') and 'dpi' not in im.info:
+                jp2_dpi = cls._parse_jp2_dpi(image_path)
+                if jp2_dpi:
+                    im.info['dpi'] = jp2_dpi
+
+            dpi = cls._get_normalized_dpi(im, default_res=default_res)
+            dpi_x = float(dpi[0])
+            dpi_y = float(dpi[1])
 
             width_pt = w * 72.0 / dpi_x
             height_pt = h * 72.0 / dpi_y
@@ -3092,22 +3113,80 @@ def launch_web_ui():
             import clr
             clr.AddReference('System.Windows.Forms')
             import System.Windows.Forms as WinForms
-            for form in WinForms.Application.OpenForms:
-                form.AllowDrop = True
-                def _on_drag_enter(sender, e):
-                    if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
-                        e.Effect = WinForms.DragDropEffects.Copy
-                def _on_drag_drop(sender, e):
-                    if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
-                        files = list(e.Data.GetData(WinForms.DataFormats.FileDrop))
-                        if files:
-                            window.evaluate_js(f"window.__onNativeFileDrop && window.__onNativeFileDrop({json.dumps(files)})")
-                form.DragEnter += _on_drag_enter
-                form.DragDrop += _on_drag_drop
+
+            wired_controls = set()
+
+            def _wire_control(ctrl):
+                if ctrl is None:
+                    return
+                try:
+                    ctrl_id = ctrl.Handle.ToInt64() if hasattr(ctrl, 'Handle') else id(ctrl)
+                    if ctrl_id in wired_controls:
+                        return
+                    wired_controls.add(ctrl_id)
+
+                    if hasattr(ctrl, 'AllowExternalDrop'):
+                        ctrl.AllowExternalDrop = False
+                    ctrl.AllowDrop = True
+
+                    none_effect = getattr(WinForms.DragDropEffects, 'None')
+
+                    def _on_drag_enter(sender, e):
+                        if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
+                            e.Effect = WinForms.DragDropEffects.Copy
+                            window.evaluate_js("window.__onNativeDragEnter && window.__onNativeDragEnter()")
+                        else:
+                            e.Effect = none_effect
+
+                    def _on_drag_over(sender, e):
+                        if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
+                            e.Effect = WinForms.DragDropEffects.Copy
+                        else:
+                            e.Effect = none_effect
+
+                    def _on_drag_leave(sender, e):
+                        window.evaluate_js("window.__onNativeDragLeave && window.__onNativeDragLeave()")
+
+                    def _on_drag_drop(sender, e):
+                        window.evaluate_js("window.__onNativeDragLeave && window.__onNativeDragLeave()")
+                        if e.Data.GetDataPresent(WinForms.DataFormats.FileDrop):
+                            raw_files = e.Data.GetData(WinForms.DataFormats.FileDrop)
+                            files = [str(f) for f in raw_files] if raw_files else []
+                            if files:
+                                window.evaluate_js(
+                                    f"window.__onNativeFileDrop && window.__onNativeFileDrop({json.dumps(files)})"
+                                )
+
+                    ctrl.DragEnter += _on_drag_enter
+                    ctrl.DragOver += _on_drag_over
+                    ctrl.DragLeave += _on_drag_leave
+                    ctrl.DragDrop += _on_drag_drop
+                except Exception:
+                    pass
+
+                if hasattr(ctrl, 'Controls'):
+                    for child in ctrl.Controls:
+                        _wire_control(child)
+
+            for form in list(WinForms.Application.OpenForms):
+                _wire_control(form)
+                if hasattr(form, 'browser') and hasattr(form.browser, 'web_view'):
+                    _wire_control(form.browser.web_view)
+                    try:
+                        def _on_webview_ready(sender, args):
+                            try:
+                                sender.AllowExternalDrop = False
+                                sender.AllowDrop = True
+                            except Exception:
+                                pass
+                        form.browser.web_view.CoreWebView2InitializationCompleted += _on_webview_ready
+                    except Exception:
+                        pass
         except Exception:
             pass
 
     window.events.shown += _enable_native_winforms_drop
+    window.events.loaded += _enable_native_winforms_drop
 
     # Win7 没有 WebView2，使用系统 IE11/MSHTML；新系统优先使用 WebView2。
     legacy_windows = sys.platform == 'win32' and sys.getwindowsversion().major <= 6
