@@ -222,6 +222,319 @@ def get_task_suffix(enable_crop, enable_binarize):
     return ""
 
 
+BACKEND_LOGS = {
+    'zh-CN': {
+        'status_scanning': '正在扫描文件...',
+        'status_extracting_pdf': '正在读取并提取 PDF 原始分页图片...',
+        'status_organizing': '正在整理处理后的图片...',
+        'status_packing_new_pdf': '正在打包生成新 PDF...',
+        'status_cleaning_temp': '正在清理临时分页图片...',
+        'status_packing_pdf': '正在打包 PDF...',
+        'status_cleaning_images': '正在清理处理后的图片...',
+        'status_direct_pdf': '正在直接打包 PDF（保持原图品质）...',
+        'status_direct_pdf_file': '正在直接打包 PDF: {name}...',
+        'status_generating_summary_pdf': '正在生成汇总 PDF...',
+        'err_pdf_abort': 'PDF 任务异常终止：{error}',
+        'err_pdf_extract': 'PDF 提取失败：{error}',
+        'err_no_images_in_pdf': '未从 PDF 中提取到可处理的图片文件！',
+        'err_no_images_for_pdf': '未找到可合并为 PDF 的处理结果图片。',
+        'err_pdf_gen_failed': '生成新 PDF 失败：{error}',
+        'err_task_aborted': '任务异常终止：{error}',
+        'err_create_output_dir': '创建输出目录失败：{error}',
+        'err_no_eligible_images': '未找到符合条件的图片文件！',
+    },
+    'zh-TW': {
+        'status_scanning': '正在掃描檔案...',
+        'status_extracting_pdf': '正在讀取並提取 PDF 原始分頁圖片...',
+        'status_organizing': '正在整理處理後的圖片...',
+        'status_packing_new_pdf': '正在封裝生成新 PDF...',
+        'status_cleaning_temp': '正在清理臨時分頁圖片...',
+        'status_packing_pdf': '正在打包 PDF...',
+        'status_cleaning_images': '正在清理處理後的圖片...',
+        'status_direct_pdf': '正在直接打包 PDF（保持原圖品質）...',
+        'status_direct_pdf_file': '正在直接打包 PDF: {name}...',
+        'status_generating_summary_pdf': '正在生成匯總 PDF...',
+        'err_pdf_abort': 'PDF 任務異常終止：{error}',
+        'err_pdf_extract': 'PDF 提取失敗：{error}',
+        'err_no_images_in_pdf': '未從 PDF 中提取到可處理的圖片檔案！',
+        'err_no_images_for_pdf': '未找到可合併為 PDF 的處理結果圖片。',
+        'err_pdf_gen_failed': '生成新 PDF 失敗：{error}',
+        'err_task_aborted': '任務異常終止：{error}',
+        'err_create_output_dir': '建立輸出目錄失敗：{error}',
+        'err_no_eligible_images': '未找到符合條件的圖片檔案！',
+    },
+    'ja': {
+        'status_scanning': 'ファイルをスキャン中...',
+        'status_extracting_pdf': 'PDFから元画像を読み込み抽出中...',
+        'status_organizing': '処理済み画像を整理中...',
+        'status_packing_new_pdf': '新規PDFを生成中...',
+        'status_cleaning_temp': '一時画像を消去中...',
+        'status_packing_pdf': 'PDFを生成中...',
+        'status_cleaning_images': '処理済み画像を消去中...',
+        'status_direct_pdf': '元の品質を保持して直接PDFにパック中...',
+        'status_direct_pdf_file': 'PDFを直接パック中: {name}...',
+        'status_generating_summary_pdf': '統合PDFを生成中...',
+        'err_pdf_abort': 'PDFタスクが異常終了しました: {error}',
+        'err_pdf_extract': 'PDF画像抽出に失敗しました: {error}',
+        'err_no_images_in_pdf': 'PDFから処理可能な画像が抽出されませんでした！',
+        'err_no_images_for_pdf': 'PDF統合可能な処理結果画像が見つかりませんでした。',
+        'err_pdf_gen_failed': '新規PDF生成に失敗しました: {error}',
+        'err_task_aborted': 'タスクが異常終了しました: {error}',
+        'err_create_output_dir': '出力フォルダの作成に失敗しました: {error}',
+        'err_no_eligible_images': '条件に適合する画像ファイルが見つかりませんでした！',
+    },
+    'en': {
+        'status_scanning': 'Scanning files...',
+        'status_extracting_pdf': 'Reading and extracting images from PDF...',
+        'status_organizing': 'Organizing processed images...',
+        'status_packing_new_pdf': 'Generating new PDF...',
+        'status_cleaning_temp': 'Cleaning temporary page images...',
+        'status_packing_pdf': 'Packing PDF...',
+        'status_cleaning_images': 'Cleaning processed images...',
+        'status_direct_pdf': 'Directly packing PDF (original quality)...',
+        'status_direct_pdf_file': 'Directly packing PDF: {name}...',
+        'status_generating_summary_pdf': 'Generating summary PDF...',
+        'err_pdf_abort': 'PDF task aborted abnormally: {error}',
+        'err_pdf_extract': 'Failed to extract PDF: {error}',
+        'err_no_images_in_pdf': 'No processable images extracted from PDF!',
+        'err_no_images_for_pdf': 'No output images found to merge into PDF.',
+        'err_pdf_gen_failed': 'Failed to generate new PDF: {error}',
+        'err_task_aborted': 'Task aborted abnormally: {error}',
+        'err_create_output_dir': 'Failed to create output directory: {error}',
+        'err_no_eligible_images': 'No matching image files found!',
+    }
+}
+
+REPORT_TEXTS = {
+    'zh-CN': {
+        'banner': "==================== 最终任务日志报告 ====================",
+        'sec_settings': "【转换设定参数】",
+        'mode_dir': "从图片目录开始处理",
+        'mode_pdf': "从PDF文件开始处理",
+        'work_mode': "- 工作模式: {mode}",
+        'pdf_input_file': "- 输入文件: {path}",
+        'pdf_output_dir': "- 任务输出目录: {dir}",
+        'dir_input_dir': "- 输入图片目录: {dir}",
+        'dir_output_dir': "- 输出目标目录: {dir}",
+        'recursive_sub': "- 递归子目录: {val}",
+        'yes': "是",
+        'no': "否",
+        'color_enabled': "- 色彩处理: 已启用 [{detail}]",
+        'color_disabled': "- 色彩处理: 未启用 (输出格式: {detail})",
+        'bin_otsu': "局部动态自适应二值化 (默认)",
+        'bin_threshold': "全局固定阈值二值化 (阈值: {val})",
+        'fmt_keep': "保持原格式与品质",
+        'fmt_jpg80': "转换为 JPG (质量 80)",
+        'crop_enabled': "- 分页处理: 已启用 [排除单页比例: < {ratio:.2f}，分割比例: {crop_detail}，阅读顺序: {dir_desc}]",
+        'crop_disabled': "- 分页处理: 未启用 (不裁切)",
+        'crop_r2l': "从右到左 (古籍常用, 右侧为_A)",
+        'crop_l2r': "从左到右 (现代书籍, 左侧为_A)",
+        'crop_width': "左右各宽 {p}%",
+        'crop_overlap': "，中缝重叠 {overlap}%",
+        'pdf_mode_no_conv': "- PDF 输出: 不转换为 PDF (仅保留处理后的图片文件)",
+        'pdf_mode_reconstruct': "- PDF 输出: 合并为新 PDF 并自动清理临时分页图片",
+        'dir_mode_direct': "- PDF 输出: 直接打包为 PDF (保持原图格式与品质，无中间图片)",
+        'dir_mode_merge': "- PDF 输出: 合并输出为单个 PDF ({detail})",
+        'dir_mode_merge_keep': "保留处理后的图片",
+        'dir_mode_merge_clean': "转换为PDF后自动清理图片",
+        'dir_mode_none': "- PDF 输出: 未合并为 PDF (仅输出图片)",
+        'max_threads': "- 最大线程数: {val}",
+        'sec_stats': "【图片与分页统计】",
+        'input_stats_pdf': "- 原始文件包含的图片/分页数量: {count} 张 (从 PDF 提取)",
+        'input_stats_dir': "- 原始文件包含的图片/分页数量: {count} 张",
+        'output_stats_crop': "- 转换后的图片总量: {total} 张 (其中排除单页数量: {excluded} 张，裁切双页数量: {cropped} 张 -> 分割生成 {generated} 张)",
+        'output_stats_nocrop_direct': "- 打包图片总量: {total} 张 (未启用裁切，全为单页)",
+        'output_stats_nocrop': "- 转换后的图片总量: {total} 张 (未启用裁切，全为单页)",
+        'succeeded_tasks': "- 任务成功项数: {succeeded} / {total}",
+        'collision_groups': "- 同名消歧重命名: 为 {count} 组同名不同格式文件自动附加来源扩展名",
+        'failures_head': "- 失败或跳过 {count} 项：",
+        'failures_more': "  * ... 另有 {count} 项未显示",
+        'sec_output': "【输出成果】",
+        'pdf_file_gen': "- 生成 PDF 文件: {path}",
+        'pdf_files_gen': "- 已生成 {count} 个 PDF 文件",
+        'pdf_gen_error': "- PDF 生成异常: {error}",
+        'output_direct_pdf': "- 处理图片文件: 保持原图品质未做修改，直接打包为 PDF",
+        'output_img_dir': "- 处理图片输出目录: {dir}",
+        'output_img_cleaned': "- 处理图片文件: 已自动清理临时分页图片，仅保留生成的 PDF 文件",
+        'report_file_saved': "- 任务日志报告已保存至: {path}",
+        'footer': "=========================================================="
+    },
+    'zh-TW': {
+        'banner': "==================== 最終任務日誌報告 ====================",
+        'sec_settings': "【轉換設定參數】",
+        'mode_dir': "從圖片目錄開始處理",
+        'mode_pdf': "從PDF文件開始處理",
+        'work_mode': "- 工作模式: {mode}",
+        'pdf_input_file': "- 輸入檔案: {path}",
+        'pdf_output_dir': "- 任務輸出目錄: {dir}",
+        'dir_input_dir': "- 輸入圖片目錄: {dir}",
+        'dir_output_dir': "- 輸出目標目錄: {dir}",
+        'recursive_sub': "- 遞迴子目錄: {val}",
+        'yes': "是",
+        'no': "否",
+        'color_enabled': "- 色彩處理: 已啟用 [{detail}]",
+        'color_disabled': "- 色彩處理: 未啟用 (輸出格式: {detail})",
+        'bin_otsu': "局部動態自適應二值化 (預設)",
+        'bin_threshold': "全域固定閾值二值化 (閾值: {val})",
+        'fmt_keep': "保持原格式與品質",
+        'fmt_jpg80': "轉換為 JPG (品質 80)",
+        'crop_enabled': "- 分頁處理: 已啟用 [排除單頁比例: < {ratio:.2f}，分割比例: {crop_detail}，閱讀順序: {dir_desc}]",
+        'crop_disabled': "- 分頁處理: 未啟用 (不裁切)",
+        'crop_r2l': "從右到左 (古籍常用, 右側為_A)",
+        'crop_l2r': "從左到右 (現代書籍, 左側為_A)",
+        'crop_width': "左右各寬 {p}%",
+        'crop_overlap': "，中縫重疊 {overlap}%",
+        'pdf_mode_no_conv': "- PDF 輸出: 不轉換為 PDF (僅保留處理後的圖片檔案)",
+        'pdf_mode_reconstruct': "- PDF 輸出: 合併為新 PDF 並自動清理臨時分頁圖片",
+        'dir_mode_direct': "- PDF 輸出: 直接打包為 PDF (保持原圖格式與品質，無中間圖片)",
+        'dir_mode_merge': "- PDF 輸出: 合併輸出為單個 PDF ({detail})",
+        'dir_mode_merge_keep': "保留處理後的圖片",
+        'dir_mode_merge_clean': "轉換為PDF後自動清理圖片",
+        'dir_mode_none': "- PDF 輸出: 未合併為 PDF (僅輸出圖片)",
+        'max_threads': "- 最大線程數: {val}",
+        'sec_stats': "【圖片與分頁統計】",
+        'input_stats_pdf': "- 原始檔案包含的圖片/分頁數量: {count} 張 (從 PDF 提取)",
+        'input_stats_dir': "- 原始檔案包含的圖片/分頁數量: {count} 張",
+        'output_stats_crop': "- 轉換後的圖片總量: {total} 張 (其中排除單頁數量: {excluded} 張，裁切雙頁數量: {cropped} 張 -> 分割生成 {generated} 張)",
+        'output_stats_nocrop_direct': "- 打包圖片總量: {total} 張 (未啟用裁切，全為單頁)",
+        'output_stats_nocrop': "- 轉換後的圖片總量: {total} 張 (未啟用裁切，全為單頁)",
+        'succeeded_tasks': "- 任務成功項數: {succeeded} / {total}",
+        'collision_groups': "- 同名消歧重命名: 為 {count} 組同名不同格式檔案自動附加來源副檔名",
+        'failures_head': "- 失敗或略過 {count} 項：",
+        'failures_more': "  * ... 另有 {count} 項未顯示",
+        'sec_output': "【輸出成果】",
+        'pdf_file_gen': "- 生成 PDF 檔案: {path}",
+        'pdf_files_gen': "- 已生成 {count} 個 PDF 檔案",
+        'pdf_gen_error': "- PDF 生成異常: {error}",
+        'output_direct_pdf': "- 處理圖片檔案: 保持原圖品質未做修改，直接打包為 PDF",
+        'output_img_dir': "- 處理圖片輸出目錄: {dir}",
+        'output_img_cleaned': "- 處理圖片檔案: 已自動清理臨時分頁圖片，僅保留生成的 PDF 檔案",
+        'report_file_saved': "- 任務日誌報告已儲存至: {path}",
+        'footer': "=========================================================="
+    },
+    'ja': {
+        'banner': "==================== 最終タスクログ報告 ====================",
+        'sec_settings': "【変換設定パラメータ】",
+        'mode_dir': "画像フォルダから処理",
+        'mode_pdf': "PDFファイルから処理",
+        'work_mode': "- 動作モード: {mode}",
+        'pdf_input_file': "- 入力ファイル: {path}",
+        'pdf_output_dir': "- タスク出力フォルダ: {dir}",
+        'dir_input_dir': "- 入力画像フォルダ: {dir}",
+        'dir_output_dir': "- 出力先フォルダ: {dir}",
+        'recursive_sub': "- サブフォルダ再帰: {val}",
+        'yes': "有効",
+        'no': "無効",
+        'color_enabled': "- カラー処理: 有効 [{detail}]",
+        'color_disabled': "- カラー処理: 無効 (出力形式: {detail})",
+        'bin_otsu': "大津の2値化 (デフォルト)",
+        'bin_threshold': "固定閾値2値化 (閾値: {val})",
+        'fmt_keep': "元の形式と品質を維持",
+        'fmt_jpg80': "JPGに変換 (品質 80)",
+        'crop_enabled': "- ページ分割処理: 有効 [単一ページ除外比率: < {ratio:.2f}，分割比率: {crop_detail}，読書順序: {dir_desc}]",
+        'crop_disabled': "- ページ分割処理: 無効 (裁断なし)",
+        'crop_r2l': "右から左へ (和綴じ/縦書き, 右側が_A)",
+        'crop_l2r': "左から右へ (洋書/横書き, 左側が_A)",
+        'crop_width': "左右各幅 {p}%",
+        'crop_overlap': "，ノド重複 {overlap}%",
+        'pdf_mode_no_conv': "- PDF 出力: PDFに変換しない (処理済み画像のみ保持)",
+        'pdf_mode_reconstruct': "- PDF 出力: 新規PDFへ統合し一時画像を自動消去",
+        'dir_mode_direct': "- PDF 出力: 直接PDFにパック (元の形式・品質を維持、中間画像なし)",
+        'dir_mode_merge': "- PDF 出力: 単一PDFへ統合出力 ({detail})",
+        'dir_mode_merge_keep': "処理済み画像を保持",
+        'dir_mode_merge_clean': "PDF生成後に画像を自動消去",
+        'dir_mode_none': "- PDF 出力: PDFへ統合しない (画像のみ出力)",
+        'max_threads': "- 最大スレッド数: {val}",
+        'sec_stats': "【画像およびページ統計】",
+        'input_stats_pdf': "- 元ファイルに含まれる画像/ページ数: {count} 枚 (PDFから抽出)",
+        'input_stats_dir': "- 元ファイルに含まれる画像/ページ数: {count} 枚",
+        'output_stats_crop': "- 処理後の画像総数: {total} 枚 (除外された単一ページ: {excluded} 枚，裁断された見開き: {cropped} 枚 -> 分割生成 {generated} 枚)",
+        'output_stats_nocrop_direct': "- パック画像総数: {total} 枚 (裁断無効、すべて単一ページ)",
+        'output_stats_nocrop': "- 処理後の画像総数: {total} 枚 (裁断無効、すべて単一ページ)",
+        'succeeded_tasks': "- 成功タスク数: {succeeded} / {total}",
+        'collision_groups': "- 同名ファイル名衝突解消: {count} 組の同名・異形式ファイルに元の拡張子を付与",
+        'failures_head': "- 失敗またはスキップ {count} 件：",
+        'failures_more': "  * ... 他 {count} 件は非表示",
+        'sec_output': "【出力成果物】",
+        'pdf_file_gen': "- 生成されたPDFファイル: {path}",
+        'pdf_files_gen': "- {count} 個のPDFファイルを生成しました",
+        'pdf_gen_error': "- PDF 生成異常: {error}",
+        'output_direct_pdf': "- 処理画像ファイル: 元の品質を保持して変更なし、直接PDFにパック",
+        'output_img_dir': "- 処理済み画像出力フォルダ: {dir}",
+        'output_img_cleaned': "- 処理画像ファイル: 一時画像は自動消去され、生成されたPDFファイルのみ保持",
+        'report_file_saved': "- タスクログ報告を保存しました: {path}",
+        'footer': "=========================================================="
+    },
+    'en': {
+        'banner': "==================== Final Task Log Report ====================",
+        'sec_settings': "[Conversion Settings]",
+        'mode_dir': "Process from Image Folder",
+        'mode_pdf': "Process from PDF File",
+        'work_mode': "- Work Mode: {mode}",
+        'pdf_input_file': "- Input File: {path}",
+        'pdf_output_dir': "- Task Output Dir: {dir}",
+        'dir_input_dir': "- Input Image Dir: {dir}",
+        'dir_output_dir': "- Target Output Dir: {dir}",
+        'recursive_sub': "- Recursive Subfolders: {val}",
+        'yes': "Yes",
+        'no': "No",
+        'color_enabled': "- Color Processing: Enabled [{detail}]",
+        'color_disabled': "- Color Processing: Disabled (Output Format: {detail})",
+        'bin_otsu': "OTSU Adaptive (Default)",
+        'bin_threshold': "Fixed Threshold (Threshold: {val})",
+        'fmt_keep': "Keep Original Format & Quality",
+        'fmt_jpg80': "Convert to JPG (Quality 80)",
+        'crop_enabled': "- Page Split/Crop: Enabled [Single-page ratio: < {ratio:.2f}, Split ratio: {crop_detail}, Reading order: {dir_desc}]",
+        'crop_disabled': "- Page Split/Crop: Disabled (No crop)",
+        'crop_r2l': "Right-to-Left (Ancient books, Right side is _A)",
+        'crop_l2r': "Left-to-Right (Modern books, Left side is _A)",
+        'crop_width': "Each side {p}% width",
+        'crop_overlap': ", Gutter overlap {overlap}%",
+        'pdf_mode_no_conv': "- PDF Output: Do not convert to PDF (Keep processed images only)",
+        'pdf_mode_reconstruct': "- PDF Output: Merge into new PDF and clean temporary images",
+        'dir_mode_direct': "- PDF Output: Directly pack into PDF (Keep original quality, no intermediate images)",
+        'dir_mode_merge': "- PDF Output: Merge into a single PDF ({detail})",
+        'dir_mode_merge_keep': "Keep processed images",
+        'dir_mode_merge_clean': "Clean images after PDF creation",
+        'dir_mode_none': "- PDF Output: Not merged into PDF (Images only)",
+        'max_threads': "- Max Threads: {val}",
+        'sec_stats': "[Image & Page Statistics]",
+        'input_stats_pdf': "- Total input images/pages: {count} (Extracted from PDF)",
+        'input_stats_dir': "- Total input images/pages: {count}",
+        'output_stats_crop': "- Total output images: {total} (Excluded single pages: {excluded}, Cropped spreads: {cropped} -> Generated {generated} pages)",
+        'output_stats_nocrop_direct': "- Total packed images: {total} (Crop disabled, all single pages)",
+        'output_stats_nocrop': "- Total output images: {total} (Crop disabled, all single pages)",
+        'succeeded_tasks': "- Succeeded items: {succeeded} / {total}",
+        'collision_groups': "- Disambiguation renaming: Appended source extensions for {count} groups of same-name files",
+        'failures_head': "- Failed or skipped {count} items:",
+        'failures_more': "  * ... {count} more items not shown",
+        'sec_output': "[Output Deliverables]",
+        'pdf_file_gen': "- Generated PDF file: {path}",
+        'pdf_files_gen': "- Generated {count} PDF files",
+        'pdf_gen_error': "- PDF generation error: {error}",
+        'output_direct_pdf': "- Processed images: Preserved original quality without modification, directly packed into PDF",
+        'output_img_dir': "- Processed image output directory: {dir}",
+        'output_img_cleaned': "- Processed images: Temporary images cleaned up, only generated PDF is retained",
+        'report_file_saved': "- Task log report saved to: {path}",
+        'footer': "=========================================================="
+    }
+}
+
+
+def get_backend_text(key, lang='zh-CN', **kwargs):
+    """获取后端日志与报告的多语言文本。"""
+    lang = lang if lang in BACKEND_LOGS else 'zh-CN'
+    tmpl = BACKEND_LOGS.get(lang, {}).get(key)
+    if tmpl is None:
+        tmpl = BACKEND_LOGS.get('zh-CN', {}).get(key, key)
+    if kwargs:
+        try:
+            return tmpl.format(**kwargs)
+        except Exception:
+            return tmpl
+    return tmpl
+
+
 class ImageProcessorApp:
     PDF_APPLICATION_NAME = "SHUGE.ORG"
 
@@ -1446,7 +1759,8 @@ class ImageProcessorApp:
         try:
             self._run_pdf_pipeline(settings)
         except Exception as e:
-            self.ui_events.put(('finish', f"PDF 任务异常终止：{str(e)}"))
+            lang = settings.get('lang') or get_system_language()
+            self.ui_events.put(('finish', get_backend_text('err_pdf_abort', lang, error=str(e))))
 
     def _run_pdf_pipeline(self, settings):
         pdf_path = settings['pdf_path']
@@ -1455,7 +1769,8 @@ class ImageProcessorApp:
         final_pdf = settings['final_pdf_path']
 
         # 阶段 1：提取原图
-        self.ui_events.put(('status', '正在读取并提取 PDF 原始分页图片...'))
+        lang = settings.get('lang') or get_system_language()
+        self.ui_events.put(('status', get_backend_text('status_extracting_pdf', lang)))
         def _extract_progress(cur, total, msg):
             self.ui_events.put(('progress', (cur / total) * 100, msg))
 
@@ -1463,10 +1778,10 @@ class ImageProcessorApp:
             pdf_path, raw_dir, progress_callback=_extract_progress, cancel_event=self.cancel_event
         )
         if self.cancel_event.is_set():
-            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'])))
+            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'], lang=lang)))
             return
         if err:
-            self.ui_events.put(('finish', f"PDF 提取失败：{err}"))
+            self.ui_events.put(('finish', get_backend_text('err_pdf_extract', lang, error=err)))
             return
 
         # 如果勾选不转换为 PDF，且未选择色彩处理和处理分页：直接提取完成即可
@@ -1498,7 +1813,7 @@ class ImageProcessorApp:
 
         total_files = len(tasks)
         if total_files == 0:
-            self.ui_events.put(('finish', "未从 PDF 中提取到可处理的图片文件！"))
+            self.ui_events.put(('finish', get_backend_text('err_no_images_in_pdf', lang)))
             return
 
         tasks, collision_groups = self._assign_output_stems(tasks)
@@ -1541,12 +1856,12 @@ class ImageProcessorApp:
                 ))
 
         if self.cancel_event.is_set():
-            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'])))
+            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'], lang=lang)))
             return
 
         # 检查是否不转换为 PDF
         if settings.get('no_convert_pdf', False) or not settings.get('enable_pdf', True):
-            self.ui_events.put(('status', '正在整理处理后的图片...'))
+            self.ui_events.put(('status', get_backend_text('status_organizing', lang)))
             try:
                 # 1. 清理 raw_dir 中的提取原图（保留 out_dir）
                 for fname in os.listdir(raw_dir):
@@ -1593,7 +1908,7 @@ class ImageProcessorApp:
             return
 
         # 阶段 3：打包生成新 PDF
-        self.ui_events.put(('status', '正在打包生成新 PDF...'))
+        self.ui_events.put(('status', get_backend_text('status_packing_new_pdf', lang)))
         processed_images = []
         for root, _, files in os.walk(out_dir):
             for filename in files:
@@ -1601,7 +1916,7 @@ class ImageProcessorApp:
                     processed_images.append(os.path.join(root, filename))
 
         if not processed_images:
-            self.ui_events.put(('finish', "未找到可合并为 PDF 的处理结果图片。"))
+            self.ui_events.put(('finish', get_backend_text('err_no_images_for_pdf', lang)))
             return
 
         processed_images.sort(
@@ -1614,15 +1929,15 @@ class ImageProcessorApp:
         )
 
         if self.cancel_event.is_set():
-            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'])))
+            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'], lang=lang)))
             return
 
         if not pdf_success:
-            self.ui_events.put(('finish', f"生成新 PDF 失败：{pdf_res}"))
+            self.ui_events.put(('finish', get_backend_text('err_pdf_gen_failed', lang, error=pdf_res)))
             return
 
         # 阶段 4：自动清理临时分页图片，仅保留生成的 PDF 文件
-        self.ui_events.put(('status', '正在清理临时分页图片...'))
+        self.ui_events.put(('status', get_backend_text('status_cleaning_temp', lang)))
         try:
             if os.path.isdir(out_dir):
                 shutil.rmtree(out_dir, ignore_errors=True)
@@ -1743,118 +2058,117 @@ class ImageProcessorApp:
     @staticmethod
     def _completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, pdf_path=None):
         settings = summary.get('settings') or {}
-        work_mode = settings.get('work_mode', 'dir')
-        is_pdf_mode = (work_mode == 'pdf')
+        lang = settings.get('lang') or summary.get('lang') or get_system_language()
+        if lang not in ('zh-CN', 'zh-TW', 'ja', 'en'):
+            lang = 'zh-CN'
 
-        lines = [
-            "==================== 最终任务日志报告 ====================",
-            "",
-            "【转换设定参数】",
-        ]
+        is_pdf_mode = (settings.get('work_mode') == 'pdf')
+        t = REPORT_TEXTS[lang]
+        lines = [t['banner'], "", t['sec_settings']]
+        mode_desc = t['mode_pdf'] if is_pdf_mode else t['mode_dir']
+        lines.append(t['work_mode'].format(mode=mode_desc))
 
-        mode_desc = "从PDF文件开始处理" if is_pdf_mode else "从图片目录开始处理"
-        lines.append(f"- 工作模式: {mode_desc}")
         if is_pdf_mode:
-            lines.append(f"- 输入文件: {settings.get('pdf_path', '')}")
-            lines.append(f"- 任务输出目录: {settings.get('clean_dir', settings.get('target_dir', ''))}")
+            lines.append(t['pdf_input_file'].format(path=settings.get('pdf_path', '')))
+            lines.append(t['pdf_output_dir'].format(dir=settings.get('clean_dir', settings.get('target_dir', ''))))
         else:
-            lines.append(f"- 输入图片目录: {settings.get('source_dir', '')}")
-            lines.append(f"- 输出目标目录: {settings.get('target_dir', '')}")
-            lines.append(f"- 递归子目录: {'是' if settings.get('include_subfolders') else '否'}")
+            lines.append(t['dir_input_dir'].format(dir=settings.get('source_dir', '')))
+            lines.append(t['dir_output_dir'].format(dir=settings.get('target_dir', '')))
+            lines.append(t['recursive_sub'].format(val=t['yes'] if settings.get('include_subfolders') else t['no']))
 
         # 色彩处理参数
         if settings.get('enable_binarize'):
-            method_desc = "局部动态自适应二值化 (默认)" if str(settings.get('bin_method')) == "0" else f"全局固定阈值二值化 (阈值: {settings.get('threshold_val', 50)})"
-            lines.append(f"- 色彩处理: 已启用 [{method_desc}]")
+            m = t['bin_otsu'] if str(settings.get('bin_method')) == "0" else t['bin_threshold'].format(val=settings.get('threshold_val', 50))
+            lines.append(t['color_enabled'].format(detail=m))
         else:
-            fmt_desc = "保持原格式" if settings.get('non_bin_format') == 'keep' else "转换为 JPG (质量 80)"
-            lines.append(f"- 色彩处理: 未启用 (输出格式: {fmt_desc})")
+            fmt = t['fmt_keep'] if settings.get('non_bin_format') == 'keep' else t['fmt_jpg80']
+            lines.append(t['color_disabled'].format(detail=fmt))
 
         # 分页裁切参数
         if settings.get('enable_crop'):
-            dir_desc = "从右到左 (古籍常用, 右侧为_A)" if settings.get('crop_direction') == 'R2L' else "从左到右 (现代书籍, 左侧为_A)"
+            d = t['crop_r2l'] if settings.get('crop_direction') == 'R2L' else t['crop_l2r']
             p = settings.get('crop_percent', 50)
             overlap = max(0, 2 * p - 100)
-            crop_detail = f"左右各宽 {p}%"
+            crop_det = t['crop_width'].format(p=p)
             if overlap > 0:
-                crop_detail += f"，中缝重叠 {overlap}%"
-            lines.append(f"- 分页处理: 已启用 [排除单页比例: < {settings.get('exclude_ratio', 0.7):.2f}，分割比例: {crop_detail}，阅读顺序: {dir_desc}]")
+                crop_det += t['crop_overlap'].format(overlap=overlap)
+            lines.append(t['crop_enabled'].format(ratio=settings.get('exclude_ratio', 0.7), crop_detail=crop_det, dir_desc=d))
         else:
-            lines.append("- 分页处理: 未启用 (不裁切)")
+            lines.append(t['crop_disabled'])
 
         # PDF 输出参数
         if is_pdf_mode:
             if settings.get('no_convert_pdf'):
-                lines.append("- PDF 输出: 不转换为 PDF (仅保留处理后的图片文件)")
+                lines.append(t['pdf_mode_no_conv'])
             else:
-                lines.append("- PDF 输出: 合并为新 PDF 并自动清理临时分页图片")
+                lines.append(t['pdf_mode_reconstruct'])
         else:
             if summary.get('direct_pdf'):
-                lines.append("- PDF 输出: 直接打包为 PDF (保持原图格式与品质，无中间图片)")
+                lines.append(t['dir_mode_direct'])
             elif pdf_count is not None or settings.get('enable_pdf'):
-                keep_img = "保留处理后的图片" if settings.get('keep_images_after_pdf', keep_images) else "转换为PDF后自动清理图片"
-                lines.append(f"- PDF 输出: 合并输出为单个 PDF ({keep_img})")
+                m_det = t['dir_mode_merge_keep'] if settings.get('keep_images_after_pdf', keep_images) else t['dir_mode_merge_clean']
+                lines.append(t['dir_mode_merge'].format(detail=m_det))
             else:
-                lines.append("- PDF 输出: 未合并为 PDF (仅输出图片)")
+                lines.append(t['dir_mode_none'])
 
-        lines.append(f"- 最大线程数: {settings.get('max_threads', 4)}")
+        lines.append(t['max_threads'].format(val=settings.get('max_threads', 4)))
         lines.append("")
 
-        # 2. 数量统计
-        lines.append("【图片与分页统计】")
+        # 数量统计
+        lines.append(t['sec_stats'])
         total_input = summary.get('total_input', summary.get('total', 0))
         if is_pdf_mode:
-            lines.append(f"- 原始文件包含的图片/分页数量: {total_input} 张 (从 PDF 提取)")
+            lines.append(t['input_stats_pdf'].format(count=total_input))
         else:
-            lines.append(f"- 原始文件包含的图片/分页数量: {total_input} 张")
+            lines.append(t['input_stats_dir'].format(count=total_input))
 
         total_output = summary.get('total_output_images', 0)
         excluded_single = summary.get('excluded_single_count', 0)
         cropped_double = summary.get('cropped_double_count', 0)
 
         if settings.get('enable_crop'):
-            lines.append(f"- 转换后的图片总量: {total_output} 张 (其中排除单页数量: {excluded_single} 张，裁切双页数量: {cropped_double} 张 -> 分割生成 {cropped_double * 2} 张)")
+            lines.append(t['output_stats_crop'].format(total=total_output, excluded=excluded_single, cropped=cropped_double, generated=cropped_double * 2))
         else:
             if summary.get('direct_pdf'):
-                lines.append(f"- 打包图片总量: {total_output} 张 (未启用裁切，全为单页)")
+                lines.append(t['output_stats_nocrop_direct'].format(total=total_output))
             else:
-                lines.append(f"- 转换后的图片总量: {total_output} 张 (未启用裁切，全为单页)")
+                lines.append(t['output_stats_nocrop'].format(total=total_output))
 
         succeeded = summary.get('succeeded', 0)
         total_tasks = summary.get('total', total_input)
-        lines.append(f"- 任务成功项数: {succeeded} / {total_tasks}")
+        lines.append(t['succeeded_tasks'].format(succeeded=succeeded, total=total_tasks))
 
         if summary.get('collision_groups'):
-            lines.append(f"- 同名消歧重命名: 为 {summary['collision_groups']} 组同名不同格式文件自动附加来源扩展名")
+            lines.append(t['collision_groups'].format(count=summary['collision_groups']))
         if summary.get('errors'):
-            lines.append(f"- 失败或跳过 {len(summary['errors'])} 项：")
+            lines.append(t['failures_head'].format(count=len(summary['errors'])))
             for item in summary['errors'][:5]:
                 lines.append(f"  * {item}")
             if len(summary['errors']) > 5:
-                lines.append(f"  * ... 另有 {len(summary['errors']) - 5} 项未显示")
+                lines.append(t['failures_more'].format(count=len(summary['errors']) - 5))
         lines.append("")
 
-        # 3. 输出交付详情
-        lines.append("【输出成果】")
+        # 输出成果
+        lines.append(t['sec_output'])
         if pdf_path:
-            lines.append(f"- 生成 PDF 文件: {pdf_path}")
+            lines.append(t['pdf_file_gen'].format(path=pdf_path))
         elif pdf_count is not None:
-            lines.append(f"- 已生成 {pdf_count} 个 PDF 文件")
+            lines.append(t['pdf_files_gen'].format(count=pdf_count))
         if pdf_error:
-            lines.append(f"- PDF 生成异常: {pdf_error}")
+            lines.append(t['pdf_gen_error'].format(error=pdf_error))
 
         if summary.get('direct_pdf'):
-            lines.append("- 处理图片文件: 保持原图品质未做修改，直接打包为 PDF")
+            lines.append(t['output_direct_pdf'])
         elif summary.get('images_kept', True) and (not is_pdf_mode or settings.get('no_convert_pdf') or settings.get('keep_images_after_pdf', keep_images)):
             target_out = (settings.get('clean_dir') or settings.get('source_dir', '')) if is_pdf_mode else (settings.get('target_dir', ''))
-            lines.append(f"- 处理图片输出目录: {target_out}")
+            lines.append(t['output_img_dir'].format(dir=target_out))
         else:
-            lines.append("- 处理图片文件: 已自动清理临时分页图片，仅保留生成的 PDF 文件")
+            lines.append(t['output_img_cleaned'])
 
         if summary.get('report_file'):
-            lines.append(f"- 任务日志报告已保存至: {summary['report_file']}")
+            lines.append(t['report_file_saved'].format(path=summary['report_file']))
 
-        lines.append("==========================================================")
+        lines.append(t['footer'])
         return '\n'.join(lines)
 
     def _build_pdf(self, settings):
@@ -1889,7 +2203,8 @@ class ImageProcessorApp:
         generated_pdfs = []
         pdf_total = sum(len(paths) for _, paths in groups)
         pdf_done = 0
-        self.ui_events.put(('status', '正在打包 PDF...'))
+        lang = settings.get('lang') or get_system_language()
+        self.ui_events.put(('status', get_backend_text('status_packing_pdf', lang)))
         for output_dir, image_paths in groups:
             image_paths.sort(
                 key=lambda path: self._natural_sort_key(
@@ -1922,7 +2237,7 @@ class ImageProcessorApp:
 
         # 检查是否保留处理后的图片（从图片目录开始处理时，默认不保留）
         if not settings.get('keep_images_after_pdf', False):
-            self.ui_events.put(('status', '正在清理处理后的图片...'))
+            self.ui_events.put(('status', get_backend_text('status_cleaning_images', lang)))
             generated_pdf_set = {
                 os.path.normcase(os.path.abspath(p)) for p in generated_pdfs
             }
@@ -2170,19 +2485,27 @@ class ImageProcessorApp:
             raise
 
     @staticmethod
-    def _clean_cancelled_output(target_dir):
+    def _clean_cancelled_output(target_dir, lang='zh-CN'):
+        lang = lang if lang in ('zh-CN', 'zh-TW', 'ja', 'en') else 'zh-CN'
+        T = {
+            'zh-CN': ("任务已取消，输出目录已被成功删除。\n({target_dir})", "任务已取消，但删除目录失败，请手动清理。\n原因: {error}"),
+            'zh-TW': ("任務已取消，輸出目錄已被成功刪除。\n({target_dir})", "任務已取消，但刪除目錄失敗，請手動清理。\n原因: {error}"),
+            'ja': ("タスクがキャンセルされ、出力フォルダが正常に削除されました。\n({target_dir})", "タスクがキャンセルされましたが、フォルダの削除に失敗しました。手動で削除してください。\n原因: {error}"),
+            'en': ("Task cancelled. Output directory was successfully removed。\n({target_dir})", "Task cancelled, but failed to delete directory. Please clean it manually.\nReason: {error}"),
+        }
         try:
             if os.path.exists(target_dir):
                 shutil.rmtree(target_dir)
-            return f"任务已取消，输出目录已被成功删除。\n({target_dir})"
+            return T[lang][0].format(target_dir=target_dir)
         except Exception as e:
-            return f"任务已取消，但删除目录失败，请手动清理。\n原因: {str(e)}"
+            return T[lang][1].format(error=str(e))
 
     def _generate_pdf_and_finish(self, settings, summary):
         """在后台生成 PDF，并将结果交给主线程显示。"""
         success, result = self._build_pdf(settings)
         if self.cancel_event.is_set():
-            self.ui_events.put(('finish', self._clean_cancelled_output(settings['target_dir'])))
+            lang = settings.get('lang') or get_system_language()
+            self.ui_events.put(('finish', self._clean_cancelled_output(settings['target_dir'], lang=lang)))
         elif success:
             summary['images_kept'] = settings.get('keep_images_after_pdf', False)
             summary_msg = self._build_and_save_task_report(
@@ -2255,7 +2578,8 @@ class ImageProcessorApp:
 
         total_files = sum(len(paths) for paths in images_by_dir.values())
         if total_files == 0:
-            self.ui_events.put(('finish', "未找到符合条件的图片文件！"))
+            lang = settings.get('lang') or get_system_language()
+            self.ui_events.put(('finish', get_backend_text('err_no_eligible_images', lang)))
             return
 
         group_targets = []
@@ -2293,15 +2617,16 @@ class ImageProcessorApp:
         pdf_total = sum(len(paths) for _, paths, _ in group_targets)
         pdf_done = 0
         generated_pdfs = []
-        self.ui_events.put(('status', '正在直接打包 PDF（保持原图品质）...'))
+        lang = settings.get('lang') or get_system_language()
+        self.ui_events.put(('status', get_backend_text('status_direct_pdf', lang)))
 
         for dir_path, image_paths, pdf_path in group_targets:
             if self.cancel_event.is_set():
-                self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir)))
+                self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir, lang=lang)))
                 return
 
             pdf_name = os.path.basename(pdf_path)
-            self.ui_events.put(('status', f"正在直接打包 PDF: {pdf_name}..."))
+            self.ui_events.put(('status', get_backend_text('status_direct_pdf_file', lang, name=pdf_name)))
             success, result = self._build_single_pdf(
                 image_paths, pdf_path, settings,
                 progress_state=[pdf_done, pdf_total],
@@ -2309,7 +2634,7 @@ class ImageProcessorApp:
             pdf_done = min(pdf_total, pdf_done + len(image_paths))
 
             if self.cancel_event.is_set():
-                self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir)))
+                self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir, lang=lang)))
                 return
 
             if not success:
@@ -2386,7 +2711,8 @@ class ImageProcessorApp:
 
         total_files = len(tasks)
         if total_files == 0:
-            self.ui_events.put(('finish', "未找到符合条件的图片文件！"))
+            lang = settings.get('lang') or get_system_language()
+            self.ui_events.put(('finish', get_backend_text('err_no_eligible_images', lang)))
             return
 
         tasks, collision_groups = self._assign_output_stems(tasks)
@@ -2442,10 +2768,11 @@ class ImageProcessorApp:
         }
 
         if self.cancel_event.is_set():
-            self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir)))
+            self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir, lang=lang)))
         else:
             if settings['enable_pdf']:
-                self.ui_events.put(('status', '正在生成汇总 PDF...'))
+                lang = settings.get('lang') or get_system_language()
+                self.ui_events.put(('status', get_backend_text('status_generating_summary_pdf', lang)))
                 self._generate_pdf_and_finish(settings, summary)
             else:
                 self.ui_events.put(('ask_pdf', settings, summary))
@@ -2781,7 +3108,8 @@ class WebImageProcessorService(ImageProcessorApp):
             def _progress(cur, total, msg):
                 self.ui_events.put(('progress', (cur / total) * 100, msg))
 
-            self.ui_events.put(('status', '正在读取并提取 PDF 原始分页图片...'))
+            lang = get_system_language()
+            self.ui_events.put(('status', get_backend_text('status_extracting_pdf', lang)))
             count, err = extract_images_from_pdf(
                 pdf_path, extract_dir, progress_callback=_progress, cancel_event=self.cancel_event
             )
@@ -2821,6 +3149,7 @@ class WebImageProcessorService(ImageProcessorApp):
                 'exclude_ratio': float(raw_settings.get('exclude_ratio', 0.7)),
                 'max_threads': int(raw_settings.get('max_threads', 8)),
                 'enable_pdf': bool(raw_settings.get('enable_pdf', False)),
+                'lang': str(raw_settings.get('lang', '')),
             }
         except (TypeError, ValueError, OverflowError):
             return None, '请使用有效的数字填写线程数、阈值和裁切参数。'
@@ -2900,6 +3229,7 @@ class WebImageProcessorService(ImageProcessorApp):
                 'exclude_ratio': float(raw_settings.get('exclude_ratio', 0.7)),
                 'max_threads': int(raw_settings.get('max_threads', 8)),
                 'enable_pdf': not no_convert_pdf,
+                'lang': str(raw_settings.get('lang', '')),
             }
         except (TypeError, ValueError, OverflowError):
             return None, '请使用有效的数字填写线程数、阈值和裁切参数。'

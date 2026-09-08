@@ -61,7 +61,7 @@
             return vm.supportedLanguages[i].label;
           }
         }
-        return '简体中文';
+        return vm.supportedLanguages.length > 0 ? vm.supportedLanguages[0].label : 'Language';
       },
       computedPdfTargetDir: function () {
         if (!this.pdfForm.pdf_path) {
@@ -303,7 +303,7 @@
       },
       showError: function (error) {
         var message = error && (error.error || error.message) ?
-          (error.error || error.message) : String(error || '未知错误');
+          (error.error || error.message) : String(error || this.$t('errUnknown'));
         this.$message.error({ message: message, duration: 5000, showClose: true });
       },
       checkForUpdates: function () {
@@ -333,7 +333,7 @@
         var vm = this;
         vm.callApi('handle_dropped_path', [path]).then(function (result) {
           if (!result || !result.ok) {
-            vm.showError(result ? result.error : '无法识别拖拽的文件或目录路径。');
+            vm.showError(result ? result.error : vm.$t('errUnrecognizedDropPath'));
             return;
           }
           if (result.type === 'dir') {
@@ -461,7 +461,8 @@
           var targetDir = vm.computedPdfTargetDir;
           var pdfSettings = Object.assign({}, vm.form, {
             pdf_path: vm.pdfForm.pdf_path,
-            no_convert_pdf: vm.pdfForm.no_convert_pdf
+            no_convert_pdf: vm.pdfForm.no_convert_pdf,
+            lang: vm.currentLang
           });
 
           function runWorkflow() {
@@ -516,6 +517,7 @@
           }
         }
 
+        vm.form.lang = vm.currentLang;
         vm.callApi('start_processing', [vm.form]).then(function (result) {
           if (!result.ok) {
             vm.showError(result);
@@ -658,18 +660,18 @@
         vm.phase = 'idle';
 
         if (event.error) {
-          vm.status = 'PDF error: ' + event.error;
+          vm.status = vm.$t('errPdfExtract') + ': ' + event.error;
           vm.showError(event.error);
           return;
         }
 
         vm.progress = 100;
-        vm.status = 'PDF OK: ' + event.count;
+        vm.status = vm.$t('pdfExtractSuccess') + ': ' + event.count;
         vm.form.source_dir = event.extract_dir;
         vm.form.target_dir = event.extract_dir.replace(/[\\\/]+$/, '') + '\\output';
 
-        var msg = '已成功从 PDF 提取 ' + event.count + ' 张图片到文件夹：\n' + event.extract_dir + '\n\n是否立即对此文件夹执行后续裁切、黑白二值化和 PDF 汇总处理？';
-        vm.$confirm(msg, '执行后续预处理', {
+        var msg = vm.$t('pdfExtractedFollowupMsg', { count: event.count, dir: event.extract_dir });
+        vm.$confirm(msg, vm.$t('pdfExtractedFollowupTitle'), {
           type: 'success',
           confirmButtonText: vm.$t('btnConfirm'),
           cancelButtonText: vm.$t('btnCancelGeneral'),
