@@ -3161,10 +3161,48 @@ class WebImageProcessorBridge:
     def open_output_folder(self):
         return self.service.open_output_folder()
 
+    def get_system_language(self):
+        return {'ok': True, 'language': get_system_language()}
+
 
 def _resource_path(*parts):
     root_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(root_dir, *parts)
+
+
+def get_system_language():
+    """检测当前操作系统界面语言，返回 'zh-CN', 'zh-TW', 'ja', 或 'en'。若未匹配则默认 'zh-CN'。"""
+    try:
+        if sys.platform == 'win32':
+            import ctypes
+            lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+            primary = lang_id & 0x3ff
+            sub = (lang_id >> 10) & 0x3f
+            if primary == 0x04:  # Chinese
+                if sub in (0x02, 0x03, 0x04):  # zh-TW, zh-HK, zh-MO
+                    return 'zh-TW'
+                return 'zh-CN'
+            elif primary == 0x11:  # Japanese
+                return 'ja'
+            elif primary == 0x09:  # English
+                return 'en'
+    except Exception:
+        pass
+    try:
+        loc = locale.getdefaultlocale()[0]
+        if loc:
+            loc = loc.lower().replace('_', '-')
+            if any(k in loc for k in ('zh-tw', 'zh-hk', 'zh-mo', 'zh-hant', 'hant')):
+                return 'zh-TW'
+            elif 'zh' in loc:
+                return 'zh-CN'
+            elif 'ja' in loc:
+                return 'ja'
+            elif 'en' in loc:
+                return 'en'
+    except Exception:
+        pass
+    return 'zh-CN'
 
 
 def _get_free_port():
@@ -3181,8 +3219,26 @@ def launch_web_ui():
     service = WebImageProcessorService()
     bridge = WebImageProcessorBridge(service)
     index_path = _resource_path('webui', 'index.html')
+    sys_lang = get_system_language()
+
+    app_titles = {
+        'zh-CN': '智能图像预处理工具 v3.4',
+        'zh-TW': '智能圖像預處理工具 v3.4',
+        'ja': 'スマート画像前処理ツール v3.4',
+        'en': 'Smart Image Preprocessor v3.4',
+    }
+    quit_confirmations = {
+        'zh-CN': '任务可能仍在运行，确定要退出吗？',
+        'zh-TW': '任務可能仍在運行，確定要退出嗎？',
+        'ja': 'タスクが実行中の可能性があります。終了しますか？',
+        'en': 'A task may still be running. Are you sure you want to quit?',
+    }
+
+    app_title = app_titles.get(sys_lang, app_titles['zh-CN'])
+    quit_msg = quit_confirmations.get(sys_lang, quit_confirmations['zh-CN'])
+
     window = webview.create_window(
-        '智能图像预处理工具 v3.4',
+        app_title,
         url=index_path,
         # 同时使用显式 expose，避免部分 Win7/MSHTML 环境在反射继承类时
         # 生成空的 API 列表。
@@ -3211,6 +3267,7 @@ def launch_web_ui():
         bridge.respond_pdf_prompt,
         bridge.poll_events,
         bridge.open_output_folder,
+        bridge.get_system_language,
     )
     # 设置 Windows 原生窗口与任务栏图标
     if sys.platform == 'win32':
@@ -3239,7 +3296,7 @@ def launch_web_ui():
         http_port=free_port,
         private_mode=True,
         localization={
-            'global.quitConfirmation': '任务可能仍在运行，确定要退出吗？',
+            'global.quitConfirmation': quit_msg,
         },
     )
 

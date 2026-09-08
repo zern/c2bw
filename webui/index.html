@@ -14,33 +14,51 @@
     <div v-if="isDragging" class="drag-drop-overlay">
       <div class="drag-drop-box">
         <i class="el-icon-upload"></i>
-        <div class="drag-drop-title">释放以载入路径</div>
-        <div class="drag-drop-subtitle">支持拖入图片目录、待处理 PDF 或图片文件</div>
+        <div class="drag-drop-title">{{ $t('dragDropTitle') }}</div>
+        <div class="drag-drop-subtitle">{{ $t('dragDropSubtitle') }}</div>
       </div>
     </div>
 
     <header class="app-header">
       <div class="brand-mark"><i class="el-icon-reading"></i></div>
       <div class="brand-copy">
-        <h1>智能图像预处理工具</h1>
-        <p>批量裁切、黑白二值化与 PDF 汇总</p>
+        <h1>{{ $t('appTitle') }}</h1>
+        <p>{{ $t('appSubtitle') }}</p>
       </div>
-      <el-tag class="version-tag" size="small" effect="plain">v3.4</el-tag>
-      <el-popover v-if="updateAvailable" placement="bottom-end" width="300" trigger="hover">
-        <div class="update-popover">
-          <div class="update-title">发现新版本 {{ updateInfo.version }}</div>
-          <div v-if="updateInfo.release_date" class="update-date">发布日期：{{ updateInfo.release_date }}</div>
-          <ul class="update-list"><li v-for="(item, index) in updateInfo.changes" :key="index">{{ item }}</li></ul>
-          <el-button type="primary" size="small" icon="el-icon-download" :disabled="!updateInfo.download_url" @click="downloadUpdate">下载最新版</el-button>
-        </div>
-        <el-badge slot="reference" is-dot class="update-badge"><i class="el-icon-bell update-icon"></i></el-badge>
-      </el-popover>
+      <div class="header-right">
+        <el-tag class="version-tag" size="small" effect="plain">v3.4</el-tag>
+        <el-dropdown trigger="click" @command="changeLanguage" class="lang-dropdown">
+          <span class="lang-trigger" :title="$t('langSelectTip')">
+            <span class="lang-icon">🌐</span> {{ currentLanguageLabel }} <i class="el-icon-arrow-down el-icon--right"></i>
+          </span>
+          <el-dropdown-menu slot="dropdown" class="lang-dropdown-menu">
+            <el-dropdown-item
+              v-for="l in supportedLanguages"
+              :key="l.code"
+              :command="l.code"
+              :class="{ 'is-active-lang': currentLang === l.code }">
+              <i v-if="currentLang === l.code" class="el-icon-check"></i>
+              <span v-else style="display:inline-block; width:14px;"></span>
+              {{ l.label }}
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </el-dropdown>
+        <el-popover v-if="updateAvailable" placement="bottom-end" width="300" trigger="hover">
+          <div class="update-popover">
+            <div class="update-title">{{ $t('updateFound') }} {{ updateInfo.version }}</div>
+            <div v-if="updateInfo.release_date" class="update-date">{{ $t('releaseDate') }}{{ updateInfo.release_date }}</div>
+            <ul class="update-list"><li v-for="(item, index) in updateInfo.changes" :key="index">{{ item }}</li></ul>
+            <el-button type="primary" size="small" icon="el-icon-download" :disabled="!updateInfo.download_url" @click="downloadUpdate">{{ $t('downloadUpdate') }}</el-button>
+          </div>
+          <el-badge slot="reference" is-dot class="update-badge"><i class="el-icon-bell update-icon"></i></el-badge>
+        </el-popover>
+      </div>
     </header>
 
     <main class="workspace">
       <el-alert
         v-if="!bridgeReady"
-        title="正在连接本地处理服务…"
+        :title="$t('statusConnecting')"
         type="info"
         :closable="false"
         show-icon>
@@ -49,105 +67,105 @@
       <div class="mode-switch-wrapper">
         <el-radio-group v-model="workMode" :disabled="processing" class="mode-radio-group">
           <el-radio-button label="dir">
-            <i class="el-icon-folder-opened"></i> 从图片目录开始处理
+            <i class="el-icon-folder-opened"></i> {{ $t('modeDir') }}
           </el-radio-button>
           <el-radio-button label="pdf">
-            <i class="el-icon-document"></i> 从PDF文件开始处理
+            <i class="el-icon-document"></i> {{ $t('modePdf') }}
           </el-radio-button>
         </el-radio-group>
         <span class="mode-tip-tag" v-if="workMode === 'pdf'">
-          <i class="el-icon-warning-outline"></i> 仅支持图片类型的PDF文件处理
+          <i class="el-icon-warning-outline"></i> {{ $t('modePdfTip') }}
         </span>
       </div>
 
       <el-card class="section-card source-card" shadow="never">
         <div slot="header" class="card-heading">
           <span class="heading-icon"><i :class="workMode === 'dir' ? 'el-icon-folder-opened' : 'el-icon-document'"></i></span>
-          <span>{{ workMode === 'dir' ? '图片目录' : 'PDF文件与目标目录' }}</span>
+          <span>{{ workMode === 'dir' ? $t('secDir') : $t('secPdf') }}</span>
         </div>
 
         <!-- 1. 从图片目录模式 -->
         <template v-if="workMode === 'dir'">
           <div class="directory-row">
-            <label>输入目录</label>
+            <label>{{ $t('labelInputDir') }}</label>
             <el-input
               v-model="form.source_dir"
               :disabled="processing"
-              placeholder="请选择或直接拖入需要处理的图片文件夹">
+              :placeholder="$t('phInputDir')">
             </el-input>
             <el-button
               :loading="directoryLoading === 'source_dir'"
               :disabled="processing"
               icon="el-icon-folder-opened"
-              @click="selectDirectory('source_dir')">浏览</el-button>
+              @click="selectDirectory('source_dir')">{{ $t('btnBrowse') }}</el-button>
           </div>
 
           <div class="directory-row">
-            <label>输出目录</label>
+            <label>{{ $t('labelOutputDir') }}</label>
             <el-input
               v-model="form.target_dir"
               :disabled="processing"
-              placeholder="默认在输入目录下创建 output 文件夹（亦可直接拖入自定义目录）">
+              :placeholder="$t('phOutputDir')">
             </el-input>
             <el-button
               :loading="directoryLoading === 'target_dir'"
               :disabled="processing"
               icon="el-icon-folder-opened"
-              @click="selectDirectory('target_dir')">浏览</el-button>
+              @click="selectDirectory('target_dir')">{{ $t('btnBrowse') }}</el-button>
           </div>
 
           <div class="directory-option">
             <el-checkbox v-model="form.include_subfolders" :disabled="processing">
-              处理子文件夹内的文件
+              {{ $t('chkIncludeSub') }}
             </el-checkbox>
-            <span>输出时保留目录结构，并自动排除本次输出目录</span>
+            <span>{{ $t('tipIncludeSub') }}</span>
           </div>
         </template>
 
         <!-- 2. 从PDF文件模式 -->
         <template v-else>
           <div class="directory-row">
-            <label>PDF 文件</label>
+            <label>{{ $t('labelPdfFile') }}</label>
             <el-input
               v-model="pdfForm.pdf_path"
               :disabled="processing"
-              placeholder="请选择或直接拖入需要处理的图片型 PDF 文件">
+              :placeholder="$t('phPdfFile')">
             </el-input>
             <el-button
               :loading="directoryLoading === 'pdf_file'"
               :disabled="processing"
               icon="el-icon-document"
-              @click="selectPdfFileForMode">选择文件</el-button>
+              @click="selectPdfFileForMode">{{ $t('btnSelectFile') }}</el-button>
           </div>
 
           <div class="directory-row">
-            <label>生成目录</label>
+            <label>{{ $t('labelGenDir') }}</label>
             <el-input
               :value="computedPdfTargetDir"
               disabled
-              placeholder="选择 PDF 并选择处理任务后自动生成">
+              :placeholder="$t('phGenDir')">
             </el-input>
             <el-tag size="medium" type="info" style="margin-left: 10px; flex-shrink: 0;">
-              {{ pdfForm.no_convert_pdf && !form.enable_crop && !form.enable_binarize ? '同名目录' : '同名+任务后缀' }}
+              {{ pdfForm.no_convert_pdf && !form.enable_crop && !form.enable_binarize ? $t('tagSameDir') : $t('tagSameDirTask') }}
             </el-tag>
           </div>
 
           <div class="directory-option">
             <el-checkbox v-model="pdfForm.no_convert_pdf" :disabled="processing">
-              不转换为PDF (仅保留处理后的图片文件)
+              {{ $t('chkNoConvertPdf') }}
             </el-checkbox>
           </div>
 
           <div class="directory-option pdf-hint">
             <i class="el-icon-info"></i>
-            <span v-if="pdfForm.no_convert_pdf && !form.enable_crop && !form.enable_binarize">将直接从 PDF 提取原始图片至同名目录，不进行裁切、色彩处理或转 PDF。</span>
-            <span v-else-if="pdfForm.no_convert_pdf">将从 PDF 提取原始图片至该同名目录并执行选定任务，保留处理后的图片文件夹，不合并为 PDF。</span>
-            <span v-else>将从 PDF 提取原始图片至该同名目录，执行选定任务并打包为新 PDF 后，自动删除临时分页图片，仅保留处理后的 PDF 文件。</span>
+            <span v-if="pdfForm.no_convert_pdf && !form.enable_crop && !form.enable_binarize">{{ $t('pdfHintExtractOnly') }}</span>
+            <span v-else-if="pdfForm.no_convert_pdf">{{ $t('pdfHintProcessOnly') }}</span>
+            <span v-else>{{ $t('pdfHintReconstruct') }}</span>
           </div>
 
           <div class="directory-option pdf-warning-hint">
             <i class="el-icon-warning"></i>
-            <span>提示：仅支持图片类型的 PDF 文件处理（扫描古籍、漫画、图片转存的 PDF）。</span>
+            <span>{{ $t('pdfWarningHint') }}</span>
           </div>
         </template>
       </el-card>
@@ -155,20 +173,20 @@
       <div class="option-grid">
         <el-card class="section-card" shadow="never">
           <div slot="header" class="card-heading card-heading-switch">
-            <span><span class="heading-icon cyan"><i class="el-icon-magic-stick"></i></span>色彩处理</span>
+            <span><span class="heading-icon cyan"><i class="el-icon-magic-stick"></i></span>{{ $t('secColor') }}</span>
             <el-switch v-model="form.enable_binarize" :disabled="processing"></el-switch>
           </div>
 
           <div v-if="form.enable_binarize" class="option-body">
             <div class="setting-row setting-row-top">
-              <span class="setting-label">二值化方式</span>
+              <span class="setting-label">{{ $t('labelBinMethod') }}</span>
               <el-radio-group v-model="form.bin_method" :disabled="processing">
-                <el-radio-button label="0">OTSU 自适应</el-radio-button>
-                <el-radio-button label="1">自定义阈值</el-radio-button>
+                <el-radio-button label="0">{{ $t('binOtsu') }}</el-radio-button>
+                <el-radio-button label="1">{{ $t('binCustom') }}</el-radio-button>
               </el-radio-group>
             </div>
             <div v-if="form.bin_method === '1'" class="setting-row compact-row">
-              <span class="setting-label">阈值</span>
+              <span class="setting-label">{{ $t('labelThreshold') }}</span>
               <el-input-number
                 v-model="form.threshold_val"
                 :min="0"
@@ -178,30 +196,30 @@
               </el-input-number>
               <span class="unit">%</span>
             </div>
-            <p class="setting-tip">输出为 1 位 Group 4 TIFF，适合文字类扫描图。</p>
+            <p class="setting-tip">{{ $t('tipBinarize') }}</p>
           </div>
 
           <div v-else class="option-body">
             <div class="setting-row setting-row-top">
-              <span class="setting-label">输出格式</span>
+              <span class="setting-label">{{ $t('labelOutputFormat') }}</span>
               <el-radio-group v-model="form.non_bin_format" :disabled="processing">
-                <el-radio label="keep">保持原格式与品质</el-radio>
-                <el-radio label="jpg80">转为 JPG（质量 80）</el-radio>
+                <el-radio label="keep">{{ $t('formatKeep') }}</el-radio>
+                <el-radio label="jpg80">{{ $t('formatJpg80') }}</el-radio>
               </el-radio-group>
             </div>
-            <p class="setting-tip">仅裁切 JPEG 时保留来源量化表和色度抽样。</p>
+            <p class="setting-tip">{{ $t('tipNonBin') }}</p>
           </div>
         </el-card>
 
         <el-card class="section-card" shadow="never">
           <div slot="header" class="card-heading card-heading-switch">
-            <span><span class="heading-icon amber"><i class="el-icon-scissors"></i></span>分页处理</span>
+            <span><span class="heading-icon amber"><i class="el-icon-scissors"></i></span>{{ $t('secCrop') }}</span>
             <el-switch v-model="form.enable_crop" :disabled="processing"></el-switch>
           </div>
 
           <div v-if="form.enable_crop" class="option-body">
             <div class="setting-row">
-              <span class="setting-label">排除单页比例</span>
+              <span class="setting-label">{{ $t('labelExcludeRatio') }}</span>
               <el-input-number
                 v-model="form.exclude_ratio"
                 :min="0.1"
@@ -213,7 +231,7 @@
               </el-input-number>
             </div>
             <div class="setting-row">
-              <span class="setting-label">分割比例</span>
+              <span class="setting-label">{{ $t('labelCropPercent') }}</span>
               <el-input-number
                 v-model="form.crop_percent"
                 :min="1"
@@ -224,10 +242,10 @@
               <span class="unit">%</span>
             </div>
             <div class="setting-row reading-order">
-              <span class="setting-label">阅读顺序</span>
+              <span class="setting-label">{{ $t('labelReadingOrder') }}</span>
               <el-radio-group v-model="form.crop_direction" :disabled="processing">
-                <el-radio label="R2L">从右到左</el-radio>
-                <el-radio label="L2R">从左到右</el-radio>
+                <el-radio label="R2L">{{ $t('orderR2L') }}</el-radio>
+                <el-radio label="L2R">{{ $t('orderL2R') }}</el-radio>
               </el-radio-group>
             </div>
 
@@ -236,30 +254,30 @@
               <!-- 1. 排除单页比例线框 -->
               <div class="wireframe-item">
                 <div class="wireframe-header">
-                  <span class="wireframe-title">单页判定线框</span>
-                  <span class="wireframe-badge">宽/高 &lt; {{ form.exclude_ratio }}</span>
+                  <span class="wireframe-title">{{ $t('wireframeSingleTitle') }}</span>
+                  <span class="wireframe-badge">{{ $t('wireframeSingleRatio', { ratio: form.exclude_ratio }) }}</span>
                 </div>
                 <div class="wireframe-stage">
                   <div
                     class="wireframe-single-box"
                     :style="{ width: singleBoxWidth + 'px' }"
-                    :title="'宽高比阈值: ' + form.exclude_ratio + ' (小于此比例不裁切)'">
+                    :title="'宽高比阈值: ' + form.exclude_ratio">
                     <div class="wireframe-box-inner">
                       <i class="el-icon-document"></i>
-                      <span>单页原图</span>
+                      <span>{{ $t('wireframeSingleOriginal') }}</span>
                     </div>
                   </div>
                 </div>
                 <div class="wireframe-caption">
-                  宽高比 &lt; {{ form.exclude_ratio }} 视为单页，跳过裁切
+                  {{ $t('wireframeSingleCaption', { ratio: form.exclude_ratio }) }}
                 </div>
               </div>
 
               <!-- 2. 双页分割比例与阅读顺序线框 -->
               <div class="wireframe-item">
                 <div class="wireframe-header">
-                  <span class="wireframe-title">双页裁切线框</span>
-                  <span class="wireframe-badge">左右各宽 {{ form.crop_percent }}%</span>
+                  <span class="wireframe-title">{{ $t('wireframeSpreadTitle') }}</span>
+                  <span class="wireframe-badge">{{ $t('wireframeSpreadBadge', { percent: form.crop_percent }) }}</span>
                 </div>
                 <div class="wireframe-stage">
                   <div class="wireframe-spread-box" :title="spreadBoxTooltip">
@@ -270,7 +288,7 @@
                         class="wireframe-page wireframe-page-left"
                         :style="{ width: (100 - cropPercentNum) + '%' }"
                         :class="{ 'is-page-a': form.crop_direction === 'L2R' }">
-                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? '② _B' : '① _A' }}</span>
+                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? $t('pageTag2') : $t('pageTag1') }}</span>
                         <span class="page-pct">{{ 100 - cropPercentNum }}%</span>
                       </div>
 
@@ -284,7 +302,7 @@
                         v-if="overlapPercent > 0"
                         class="wireframe-page wireframe-page-overlap"
                         :style="{ width: overlapPercent + '%' }">
-                        <span class="overlap-tag">中缝重叠</span>
+                        <span class="overlap-tag">{{ $t('wireframeOverlap') }}</span>
                         <span class="overlap-pct">{{ overlapPercent }}%</span>
                       </div>
 
@@ -298,7 +316,7 @@
                         class="wireframe-page wireframe-page-right"
                         :style="{ width: (100 - cropPercentNum) + '%' }"
                         :class="{ 'is-page-a': form.crop_direction === 'R2L' }">
-                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? '① _A' : '② _B' }}</span>
+                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? $t('pageTag1') : $t('pageTag2') }}</span>
                         <span class="page-pct">{{ 100 - cropPercentNum }}%</span>
                       </div>
                     </template>
@@ -309,7 +327,7 @@
                         class="wireframe-page wireframe-page-left"
                         :style="{ width: cropPercentNum + '%' }"
                         :class="{ 'is-page-a': form.crop_direction === 'L2R' }">
-                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? '② _B' : '① _A' }}</span>
+                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? $t('pageTag2') : $t('pageTag1') }}</span>
                         <span class="page-pct">{{ cropPercentNum }}%</span>
                       </div>
 
@@ -318,7 +336,7 @@
                       </div>
 
                       <div class="wireframe-page wireframe-page-gap" :style="{ width: gapPercent + '%' }">
-                        <span class="gap-tag">未裁入区</span>
+                        <span class="gap-tag">{{ $t('wireframeGap') }}</span>
                         <span class="gap-pct">{{ gapPercent }}%</span>
                       </div>
 
@@ -330,7 +348,7 @@
                         class="wireframe-page wireframe-page-right"
                         :style="{ width: cropPercentNum + '%' }"
                         :class="{ 'is-page-a': form.crop_direction === 'R2L' }">
-                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? '① _A' : '② _B' }}</span>
+                        <span class="page-tag">{{ form.crop_direction === 'R2L' ? $t('pageTag1') : $t('pageTag2') }}</span>
                         <span class="page-pct">{{ cropPercentNum }}%</span>
                       </div>
                     </template>
@@ -345,7 +363,7 @@
 
           <div v-else class="disabled-panel">
             <i class="el-icon-document"></i>
-            <span>每张图片按单页输出</span>
+            <span>{{ $t('singlePageOnly') }}</span>
           </div>
         </el-card>
       </div>
@@ -353,12 +371,12 @@
       <el-card class="section-card execution-card" shadow="never">
         <div slot="header" class="card-heading">
           <span class="heading-icon violet"><i class="el-icon-setting"></i></span>
-          <span>执行设置</span>
+          <span>{{ $t('secExecution') }}</span>
         </div>
 
         <div class="execution-options">
           <div class="inline-setting">
-            <span>最大线程数</span>
+            <span>{{ $t('labelMaxThreads') }}</span>
             <el-input-number
               v-model="form.max_threads"
               :min="1"
@@ -369,34 +387,34 @@
           </div>
           <template v-if="workMode === 'dir'">
             <el-checkbox v-model="form.enable_pdf" :disabled="processing">
-              完成后合并输出为 PDF
+              {{ $t('chkEnablePdf') }}
             </el-checkbox>
             <el-checkbox
               v-if="form.enable_pdf && (form.enable_crop || form.enable_binarize || form.non_bin_format === 'jpg80')"
               v-model="form.keep_images_after_pdf"
               :disabled="processing"
               style="margin-left: 15px;">
-              合成PDF后保留处理后的图片
+              {{ $t('chkKeepImages') }}
             </el-checkbox>
             <el-tag v-if="form.enable_pdf && !form.enable_crop && !form.enable_binarize && form.non_bin_format === 'keep'" size="small" type="success" effect="plain" style="margin-left: 10px;">
-              <i class="el-icon-check"></i> 保持原图品质，直接打包为 PDF
+              <i class="el-icon-check"></i> {{ $t('tagDirectPdf') }}
             </el-tag>
             <el-tag v-else-if="form.enable_pdf && !form.enable_crop && !form.enable_binarize && form.non_bin_format === 'jpg80'" size="small" type="warning" effect="plain" style="margin-left: 10px;">
-              <i class="el-icon-picture-outline"></i> 先转换为 JPG(质量80) 再打包为 PDF
+              <i class="el-icon-picture-outline"></i> {{ $t('tagJpgPdf') }}
             </el-tag>
           </template>
           <template v-else>
             <el-checkbox v-model="pdfForm.no_convert_pdf" :disabled="processing">
-              不转换为PDF (仅保留处理后的图片)
+              {{ $t('chkNoConvertPdf') }}
             </el-checkbox>
             <el-tag v-if="!pdfForm.no_convert_pdf" size="small" type="success" effect="plain" style="margin-left: 10px;">
-              <i class="el-icon-check"></i> 处理后自动转为新 PDF 并清理分页图片
+              <i class="el-icon-check"></i> {{ $t('tagPdfReconstruct') }}
             </el-tag>
             <el-tag v-else-if="!form.enable_crop && !form.enable_binarize" size="small" type="warning" effect="plain" style="margin-left: 10px;">
-              <i class="el-icon-download"></i> 直接提取 PDF 原始图片至同名目录
+              <i class="el-icon-download"></i> {{ $t('tagPdfExtractOnly') }}
             </el-tag>
             <el-tag v-else size="small" type="warning" effect="plain" style="margin-left: 10px;">
-              <i class="el-icon-folder"></i> 仅输出处理后的图片文件夹
+              <i class="el-icon-folder"></i> {{ $t('tagPdfProcessOnly') }}
             </el-tag>
           </template>
         </div>
@@ -423,15 +441,15 @@
             type="danger"
             plain
             :disabled="!processing || phase === 'cancelling'"
-            @click="cancelTask">取消任务</el-button>
+            @click="cancelTask">{{ $t('btnCancel') }}</el-button>
           <el-button
             :disabled="!canPause"
-            @click="togglePause">{{ paused ? '继续' : '暂停' }}</el-button>
+            @click="togglePause">{{ paused ? $t('btnResume') : $t('btnPause') }}</el-button>
           <el-button
             type="primary"
             icon="el-icon-video-play"
             :disabled="!bridgeReady || processing"
-            @click="startTask">开始处理</el-button>
+            @click="startTask">{{ $t('btnStart') }}</el-button>
         </div>
       </el-card>
     </main>
@@ -440,6 +458,7 @@
   <script src="vendor/es6-promise.auto.min.js"></script>
   <script src="vendor/vue.min.js"></script>
   <script src="vendor/element-ui.js"></script>
+  <script src="i18n.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

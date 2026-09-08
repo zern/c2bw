@@ -63,14 +63,53 @@ body {
   font-size: 13px;
 }
 
-.version-tag {
+.header-right {
+  display: flex;
+  align-items: center;
   margin-left: auto;
+  gap: 12px;
+}
+
+.version-tag {
   border-color: rgba(255, 255, 255, 0.42) !important;
   color: #ffffff !important;
   background: rgba(255, 255, 255, 0.08) !important;
 }
 
-.update-badge { margin-left: 16px; cursor: pointer; }
+.lang-dropdown {
+  cursor: pointer;
+}
+
+.lang-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.38);
+  border-radius: 6px;
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+  font-size: 13px;
+  user-select: none;
+  transition: all 0.2s ease;
+}
+
+.lang-trigger:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.75);
+}
+
+.lang-trigger .lang-icon {
+  font-size: 14px;
+}
+
+.lang-dropdown-menu .is-active-lang {
+  color: #2f80ed !important;
+  font-weight: 600;
+  background-color: #f0f7ff;
+}
+
+.update-badge { margin-left: 4px; cursor: pointer; }
 .update-icon { color: #ffd166; font-size: 22px; }
 .update-popover .update-title { color: #163c68; font-size: 16px; font-weight: 600; }
 .update-date { margin-top: 5px; color: #8492a6; font-size: 12px; }

@@ -1,9 +1,17 @@
 (function () {
   'use strict';
 
+  var i18n = window.c2bwI18n || {
+    getCurrentLanguage: function () { return 'zh-CN'; },
+    supportedLanguages: [{ code: 'zh-CN', label: '简体中文' }],
+    t: function (key) { return key; },
+    setLanguage: function (l) { return l; }
+  };
+
   new Vue({
     el: '#app',
     data: function () {
+      var initialLang = i18n.getCurrentLanguage();
       return {
         bridgeReady: false,
         isDragging: false,
@@ -14,7 +22,9 @@
         paused: false,
         phase: 'idle',
         progress: 0,
-        status: '准备就绪',
+        currentLang: initialLang,
+        supportedLanguages: i18n.supportedLanguages,
+        status: i18n.t('statusReady', null, initialLang),
         pollTimer: null,
         bridgeRetryTimer: null,
         workMode: 'dir',
@@ -44,6 +54,15 @@
       canPause: function () {
         return this.processing && this.phase === 'processing';
       },
+      currentLanguageLabel: function () {
+        var vm = this;
+        for (var i = 0; i < vm.supportedLanguages.length; i++) {
+          if (vm.supportedLanguages[i].code === vm.currentLang) {
+            return vm.supportedLanguages[i].label;
+          }
+        }
+        return '简体中文';
+      },
       computedPdfTargetDir: function () {
         if (!this.pdfForm.pdf_path) {
           return '';
@@ -56,31 +75,31 @@
         var stem = dotIdx >= 0 ? filename.substring(0, dotIdx) : filename;
         var suffix = '';
         if (this.form.enable_crop && this.form.enable_binarize) {
-          suffix = '_已裁切_黑白版';
+          suffix = this.$t('pdfSuffixCroppedBin');
         } else if (this.form.enable_crop) {
-          suffix = '_已裁切';
+          suffix = this.$t('pdfSuffixCropped');
         } else if (this.form.enable_binarize) {
-          suffix = '_黑白版';
+          suffix = this.$t('pdfSuffixBin');
         }
         if (!suffix) {
           if (this.pdfForm.no_convert_pdf) {
             return (dir ? dir + '\\' : '') + stem;
           }
-          return '（请至少勾选一种任务：裁切或黑白二值化）';
+          return this.$t('pdfSuffixNone');
         }
         return (dir ? dir + '\\' : '') + stem + suffix;
       },
       phaseText: function () {
-        var names = {
-          idle: '任务进度',
-          extracting_pdf: '正在提取 PDF 图片',
-          processing: this.paused ? '处理已暂停' : '正在处理图片',
-          awaiting_pdf: '等待 PDF 确认',
-          pdf: '正在生成 PDF',
-          cancelling: '正在取消任务',
-          finishing: '正在完成任务'
+        var map = {
+          idle: this.$t('phaseIdle'),
+          extracting_pdf: this.$t('phaseExtractingPdf'),
+          processing: this.paused ? this.$t('phasePaused') : this.$t('phaseProcessing'),
+          awaiting_pdf: this.$t('phaseAwaitingPdf'),
+          pdf: this.$t('phasePdf'),
+          cancelling: this.$t('phaseCancelling'),
+          finishing: this.$t('phaseFinishing')
         };
-        return names[this.phase] || '任务进度';
+        return map[this.phase] || this.$t('phaseIdle');
       },
       singleBoxWidth: function () {
         var ratio = parseFloat(this.form.exclude_ratio);
@@ -104,23 +123,23 @@
       },
       spreadCaptionText: function () {
         var p = this.cropPercentNum;
-        var pageA = this.form.crop_direction === 'R2L' ? '右页为第1页(_A)' : '左页为第1页(_A)';
+        var pageA = this.form.crop_direction === 'R2L' ? this.$t('captionR2L') : this.$t('captionL2R');
         if (p > 50) {
-          return '左右各裁切 ' + p + '%，中缝重叠 ' + this.overlapPercent + '%（保证中缝内容可阅读）· ' + pageA;
+          return this.$t('captionOverlap', { crop: p, overlap: this.overlapPercent, order: pageA });
         } else if (p === 50) {
-          return '左右各裁切 50%，居中均分裁切无重叠 · ' + pageA;
+          return this.$t('captionEqual', { order: pageA });
         } else {
-          return '左右各裁切 ' + p + '%，中间未裁入 ' + this.gapPercent + '% · ' + pageA;
+          return this.$t('captionGap', { crop: p, gap: this.gapPercent, order: pageA });
         }
       },
       spreadBoxTooltip: function () {
         var p = this.cropPercentNum;
         if (p > 50) {
-          return '左右各占原图 ' + p + '% 宽度，中间 ' + this.overlapPercent + '% 为重复重叠区，确保中缝装订内容完整';
+          return this.$t('tooltipOverlap', { crop: p, overlap: this.overlapPercent });
         } else if (p === 50) {
-          return '左右各占 50% 宽度，居中均分裁切';
+          return this.$t('tooltipEqual');
         } else {
-          return '左右各占 ' + p + '% 宽度，中间 ' + this.gapPercent + '% 未裁入';
+          return this.$t('tooltipGap', { crop: p, gap: this.gapPercent });
         }
       }
     },
@@ -134,18 +153,30 @@
     },
     mounted: function () {
       var vm = this;
+      document.title = vm.$t('appTitle');
+
       function connectBridge() {
         if (vm.bridgeReady) {
           return;
         }
-        // pywebview 注入 API 的时机在不同后端（尤其是 Win7/MSHTML）可能不同，
-        // 不能只依赖一次 pywebviewready 事件。
         if (!window.pywebview || !window.pywebview.api) {
-          vm.status = '正在连接本地处理服务…';
+          vm.status = vm.$t('statusConnecting');
           return;
         }
         vm.bridgeReady = true;
-        vm.status = '准备就绪';
+        vm.status = vm.$t('statusReady');
+
+        // 若用户未手动设置语言，尝试从后端同步操作系统语言
+        try {
+          if (!localStorage.getItem('c2bw_language')) {
+            vm.callApi('get_system_language').then(function (res) {
+              if (res && res.language) {
+                vm.changeLanguage(res.language);
+              }
+            }).catch(function () {});
+          }
+        } catch (e) {}
+
         vm.checkForUpdates();
         if (vm.bridgeRetryTimer) {
           window.clearInterval(vm.bridgeRetryTimer);
@@ -233,6 +264,18 @@
       }
     },
     methods: {
+      $t: function (key, params) {
+        return window.c2bwI18n ? window.c2bwI18n.t(key, params, this.currentLang) : key;
+      },
+      changeLanguage: function (lang) {
+        if (window.c2bwI18n) {
+          this.currentLang = window.c2bwI18n.setLanguage(lang);
+          document.title = this.$t('appTitle');
+          if (this.phase === 'idle' && !this.processing) {
+            this.status = this.$t('statusReady');
+          }
+        }
+      },
       callApi: function (method, args) {
         var vm = this;
         var attempts = 0;
@@ -250,7 +293,7 @@
             }
             attempts += 1;
             if (attempts >= 25) {
-              reject(new Error('本地处理服务尚未连接，请稍候重试。'));
+              reject(new Error(vm.$t('statusConnecting')));
               return;
             }
             window.setTimeout(invoke, 200);
@@ -297,16 +340,16 @@
             vm.workMode = 'dir';
             vm.form.source_dir = result.path;
             vm.form.target_dir = result.suggested_target_dir;
-            vm.$message.success('已载入输入图片目录：' + result.path);
+            vm.$message.success(vm.$t('loadedInputDir') + ': ' + result.path);
           } else if (result.type === 'pdf') {
             vm.workMode = 'pdf';
             vm.pdfForm.pdf_path = result.path;
-            vm.$message.success('已载入待处理 PDF 文件：' + result.path);
+            vm.$message.success(vm.$t('loadedPdfFile') + ': ' + result.path);
           } else if (result.type === 'image') {
             vm.workMode = 'dir';
             vm.form.source_dir = result.parent_dir;
             vm.form.target_dir = result.suggested_target_dir;
-            vm.$message.success('已载入图片所在目录：' + result.parent_dir);
+            vm.$message.success(vm.$t('loadedImageParentDir') + ': ' + result.parent_dir);
           }
         }).catch(function (error) {
           vm.showError(error);
@@ -326,7 +369,7 @@
           }
           vm.form[field] = result.path;
           if (field === 'source_dir') {
-            vm.form.target_dir = result.path.replace(/[\\\/]+$/, '') + '\\\\output';
+            vm.form.target_dir = result.path.replace(/[\\\/]+$/, '') + '\\output';
           }
         }).catch(function (error) {
           vm.directoryLoading = '';
@@ -364,15 +407,15 @@
             return;
           }
 
-          var confirmMsg = '已选择 PDF 文件：\n' + result.pdf_path + '\n\n是否提取分页图片到同名目录：\n' + result.extract_dir + '？';
+          var confirmMsg = vm.$t('pdfExtractConfirmMsg', { pdf: result.pdf_path, dir: result.extract_dir });
           if (result.dir_exists_nonempty) {
-            confirmMsg += '\n\n注意：目标目录已存在且非空，继续提取可能会覆盖同名文件！';
+            confirmMsg += vm.$t('pdfExtractWarning');
           }
 
-          vm.$confirm(confirmMsg, '提取确认', {
+          vm.$confirm(confirmMsg, vm.$t('pdfExtractConfirmTitle'), {
             type: 'info',
-            confirmButtonText: '确认提取',
-            cancelButtonText: '取消',
+            confirmButtonText: vm.$t('btnExtractConfirm'),
+            cancelButtonText: vm.$t('btnCancelGeneral'),
             distinguishCancelAndClose: true,
             closeOnClickModal: false
           }).then(function () {
@@ -389,7 +432,7 @@
               vm.paused = false;
               vm.phase = 'extracting_pdf';
               vm.progress = 0;
-              vm.status = '正在读取并提取 PDF 原始分页图片...';
+              vm.status = vm.$t('phaseExtractingPdf');
             }
           }).catch(function (action) {
             vm.directoryLoading = '';
@@ -406,12 +449,12 @@
         var vm = this;
         if (vm.workMode === 'pdf') {
           if (!vm.pdfForm.pdf_path) {
-            vm.showError('请先选择待处理的 PDF 文件！');
+            vm.showError(vm.$t('errSelectPdf'));
             return;
           }
           if (!vm.form.enable_crop && !vm.form.enable_binarize) {
             if (!vm.pdfForm.no_convert_pdf) {
-              vm.showError('请至少选择一种处理任务（裁切或黑白二值化）！');
+              vm.showError(vm.$t('errSelectTask'));
               return;
             }
           }
@@ -431,7 +474,7 @@
               vm.paused = false;
               vm.phase = 'extracting_pdf';
               vm.progress = 0;
-              vm.status = '正在启动 PDF 流水线任务...';
+              vm.status = vm.$t('statusStartingWorkflow');
             }).catch(function (error) {
               vm.showError(error);
             });
@@ -439,20 +482,20 @@
 
           var confirmMessage;
           if (vm.pdfForm.no_convert_pdf && !vm.form.enable_crop && !vm.form.enable_binarize) {
-            confirmMessage = '将直接从 PDF 提取原始图片至同名目录（不进行裁切、色彩处理或转 PDF）：\n\n提取目录：\n' + targetDir + '\n\n是否确认开始？';
+            confirmMessage = vm.$t('pdfWorkflowMsgExtract', { dir: targetDir });
           } else if (vm.pdfForm.no_convert_pdf) {
-            confirmMessage = '将对 PDF 依次执行：从 PDF 提取原始图片至生成目录 -> 批量预处理 -> 保留处理后的图片文件夹（不生成 PDF）。\n\n输出目录：\n' + targetDir + '\n\n是否确认开始？';
+            confirmMessage = vm.$t('pdfWorkflowMsgProcess', { dir: targetDir });
           } else {
-            confirmMessage = '将对 PDF 依次执行：从 PDF 提取原始图片至生成目录 -> 批量预处理 -> 转换生成新 PDF -> 自动删除分页图片。\n\n生成目录：\n' + targetDir + '\n\n是否确认开始？';
+            confirmMessage = vm.$t('pdfWorkflowMsgReconstruct', { dir: targetDir });
           }
 
           vm.$confirm(
             confirmMessage,
-            '开始 PDF 任务',
+            vm.$t('pdfWorkflowConfirmTitle'),
             {
               type: 'info',
-              confirmButtonText: '立即开始',
-              cancelButtonText: '取消',
+              confirmButtonText: vm.$t('pdfWorkflowConfirmStart'),
+              cancelButtonText: vm.$t('btnCancelGeneral'),
               closeOnClickModal: false
             }
           ).then(function () {
@@ -463,12 +506,12 @@
 
         // 图片目录模式
         if (!vm.form.source_dir) {
-          vm.showError('请先选择输入图片目录！');
+          vm.showError(vm.$t('errSelectSourceDir'));
           return;
         }
         if (!vm.form.enable_crop && !vm.form.enable_binarize) {
           if (vm.form.non_bin_format === 'keep' && !vm.form.enable_pdf) {
-            vm.showError('请至少启用一种处理任务（色彩处理或分页裁切），或选择转为 JPG，或勾选合并输出为 PDF！');
+            vm.showError(vm.$t('errSelectAnyTask'));
             return;
           }
         }
@@ -482,7 +525,7 @@
           vm.paused = false;
           vm.phase = 'processing';
           vm.progress = 0;
-          vm.status = '正在扫描文件...';
+          vm.status = vm.$t('statusScanning');
           vm.form.target_dir = result.target_dir;
         }).catch(function (error) {
           vm.showError(error);
@@ -504,12 +547,12 @@
       cancelTask: function () {
         var vm = this;
         vm.$confirm(
-          '取消后会删除本次输出目录及其中的所有文件。确定继续吗？',
-          '取消任务',
+          vm.$t('confirmCancelMsg'),
+          vm.$t('confirmCancelTitle'),
           {
             type: 'warning',
-            confirmButtonText: '确定取消',
-            cancelButtonText: '继续处理',
+            confirmButtonText: vm.$t('btnConfirmCancel'),
+            cancelButtonText: vm.$t('btnContinueProcessing'),
             closeOnClickModal: false
           }
         ).then(function () {
@@ -547,12 +590,12 @@
       askForPdf: function (includeSubfolders) {
         var vm = this;
         var message = includeSubfolders ?
-          '已启用子文件夹处理，将按每个子文件夹分别生成 PDF。是否继续？' :
-          '图片处理已经完成，是否合并输出为单个 PDF？';
-        vm.$confirm(message, '合并输出为 PDF', {
+          vm.$t('confirmPdfMsgSub') :
+          vm.$t('confirmPdfMsgSingle');
+        vm.$confirm(message, vm.$t('confirmPdfTitle'), {
           type: 'info',
-          confirmButtonText: '生成 PDF',
-          cancelButtonText: '保持图片输出',
+          confirmButtonText: vm.$t('btnGeneratePdf'),
+          cancelButtonText: vm.$t('btnKeepImages'),
           distinguishCancelAndClose: true,
           closeOnClickModal: false
         }).then(function () {
@@ -568,8 +611,8 @@
         vm.phase = 'idle';
         vm.progress = 100;
         vm.status = event.message;
-        vm.$alert(event.message, '任务结束', {
-          confirmButtonText: '确定',
+        vm.$alert(event.message, vm.$t('taskFinishedTitle'), {
+          confirmButtonText: vm.$t('btnConfirm'),
           type: event.can_open_output ? 'success' : 'info',
           dangerouslyUseHTMLString: false,
           customClass: 'result-dialog'
@@ -600,7 +643,7 @@
         } else if (event.type === 'ask_pdf') {
           this.progress = 100;
           this.phase = 'awaiting_pdf';
-          this.status = '图片处理完成，等待选择是否生成 PDF。';
+          this.status = this.$t('phaseAwaitingPdf');
           this.askForPdf(event.include_subfolders);
         } else if (event.type === 'pdf_extracted') {
           this.handlePdfExtracted(event);
@@ -615,21 +658,21 @@
         vm.phase = 'idle';
 
         if (event.error) {
-          vm.status = 'PDF 提取失败：' + event.error;
+          vm.status = 'PDF error: ' + event.error;
           vm.showError(event.error);
           return;
         }
 
         vm.progress = 100;
-        vm.status = 'PDF 图片提取完成，共提取 ' + event.count + ' 张图片。';
+        vm.status = 'PDF OK: ' + event.count;
         vm.form.source_dir = event.extract_dir;
         vm.form.target_dir = event.extract_dir.replace(/[\\\/]+$/, '') + '\\output';
 
         var msg = '已成功从 PDF 提取 ' + event.count + ' 张图片到文件夹：\n' + event.extract_dir + '\n\n是否立即对此文件夹执行后续裁切、黑白二值化和 PDF 汇总处理？';
         vm.$confirm(msg, '执行后续预处理', {
           type: 'success',
-          confirmButtonText: '立即执行',
-          cancelButtonText: '仅保留路径',
+          confirmButtonText: vm.$t('btnConfirm'),
+          cancelButtonText: vm.$t('btnCancelGeneral'),
           distinguishCancelAndClose: true,
           closeOnClickModal: false
         }).then(function () {
