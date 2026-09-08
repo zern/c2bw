@@ -3443,11 +3443,41 @@ class WebImageProcessorService(ImageProcessorApp):
         except OSError as e:
             return {'ok': False, 'error': f'无法打开输出目录：{str(e)}'}
 
+    def _sync_window_localization(self, lang):
+        if not self.window:
+            return
+        title = APP_TITLES.get(lang, APP_TITLES['zh-CN'])
+        quit_msg = QUIT_CONFIRMATIONS.get(lang, QUIT_CONFIRMATIONS['zh-CN'])
+        try:
+            self.window.set_title(title)
+        except Exception:
+            pass
+        try:
+            if hasattr(self.window, 'localization') and isinstance(self.window.localization, dict):
+                self.window.localization['global.quitConfirmation'] = quit_msg
+            if hasattr(self.window, 'localization_override') and isinstance(self.window.localization_override, dict):
+                self.window.localization_override['global.quitConfirmation'] = quit_msg
+        except Exception:
+            pass
+        try:
+            import webview.platforms.winforms as winforms_platform
+            browser_form = winforms_platform.BrowserView.instances.get(self.window.uid)
+            if browser_form and hasattr(browser_form, 'localization') and isinstance(browser_form.localization, dict):
+                browser_form.localization['global.quitConfirmation'] = quit_msg
+        except Exception:
+            pass
+        try:
+            import webview.localization
+            webview.localization.original_localization['global.quitConfirmation'] = quit_msg
+        except Exception:
+            pass
+
     def get_user_language(self):
         saved = get_saved_language()
         sys_lang = get_system_language()
         effective = saved if saved else sys_lang
         self.current_language = effective
+        self._sync_window_localization(effective)
         return {
             'ok': True,
             'saved_language': saved,
@@ -3459,12 +3489,7 @@ class WebImageProcessorService(ImageProcessorApp):
         if lang in ('zh-CN', 'zh-TW', 'ja', 'en'):
             self.current_language = lang
             save_user_language(lang)
-            if self.window:
-                try:
-                    title = APP_TITLES.get(lang, APP_TITLES['zh-CN'])
-                    self.window.set_title(title)
-                except Exception:
-                    pass
+            self._sync_window_localization(lang)
             return {'ok': True, 'language': lang}
         return {'ok': False, 'error': f'Invalid language: {lang}'}
 
