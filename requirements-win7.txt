@@ -5,3 +5,4 @@ pypdf==3.17.4
 pyinstaller==4.10
 pywebview==4.4.1
 pythonnet==3.0.5
+pywin32<=306

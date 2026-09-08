@@ -37,7 +37,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pyinstaller
+          python -m pip install -r requirements.txt pyinstaller pywin32
           python -m PyInstaller --noconfirm --clean c2bw.spec
           $builtExe = Get-ChildItem dist -Filter "智能图像预处理工具 v*.exe" | Where-Object { $_.Name -notmatch "_Win7" } | Select-Object -First 1
           Copy-Item $builtExe.FullName "dist/c2bw-windows-x64.exe" -Force
@@ -53,7 +53,7 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade "pip<24.1" "setuptools<60.7" "wheel<0.46"
-          python -m pip install -r requirements-win7.txt
+          python -m pip install -r requirements-win7.txt "pywin32<=306"
           $dll = python -c "import os, pythonnet; print(os.path.join(os.path.dirname(pythonnet.__file__), 'runtime', 'Python.Runtime.dll'))"
           if (Test-Path $dll) { Copy-Item $dll . -Force }
           python -m PyInstaller --noconfirm --clean c2bw_win7.spec
