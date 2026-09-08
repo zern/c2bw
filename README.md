@@ -6,7 +6,7 @@
 
 `c2bw`（Color to Black & White）是一款高效、专业的批量图像与扫描文档预处理工具，主要用于书籍扫描、文献归档中的图片双页裁切、黑白二值化、无损原图提取以及高清紧凑 PDF 汇总。
 
-当前版本：**v3.4**
+当前版本：**v3.5**
 
 > 📖 **[点击查看：单文件版本详细用户操作使用说明 (使用说明.md)](使用说明.md)**
 
@@ -118,8 +118,8 @@ del Python.Runtime.dll
 ```
 
 生成产物位于 `dist\`：
-- `dist\智能图像预处理工具 v3.4.exe`
-- `dist\c2bw_v3.4.exe`
+- `dist\智能图像预处理工具 v3.5.exe`
+- `dist\c2bw_v3.5.exe`
 
 ### 2. Windows 7 专用独立版
 
@@ -138,9 +138,9 @@ del Python.Runtime.dll
 ```
 
 生成产物位于 `dist\`：
-- `dist\智能图像预处理工具 v3.4_Win7.exe`
+- `dist\智能图像预处理工具 v3.5_Win7.exe`
 - `dist\c2bw_win7.exe`
-- `dist\c2bw_v3.4_win7.exe`
+- `dist\c2bw_v3.5_win7.exe`
 
 ---
 
@@ -156,7 +156,7 @@ del Python.Runtime.dll
 - **Linux (x64)**：`c2bw-linux-x64` (适配主流 Linux 发行版，glibc >= 2.35)
 
 > **触发机制**：
-> - **自动发布**：向仓库推送版本标签（如 `git tag v3.4 && git push origin v3.4`）时，自动触发全平台并行编译并直接创建 GitHub Release 附带全部二进制文件及 `SHA256SUMS.txt` 校验清单；
+> - **自动发布**：向仓库推送版本标签（如 `git tag v3.5 && git push origin v3.5`）时，自动触发全平台并行编译并直接创建 GitHub Release 附带全部二进制文件及 `SHA256SUMS.txt` 校验清单；
 > - **手动触发**：亦可在 GitHub 仓库的 `Actions` 页面选择 `Build and Release Multi-Platform Binaries` 手动一键运行测试。
 
 ### 2. 本地手工构建命令
