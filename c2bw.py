@@ -2872,6 +2872,7 @@ class WebImageProcessorService(ImageProcessorApp):
         self.last_output_dir = None
         self.pending_pdf = None
         self.window = None
+        self.current_language = None
 
     def bind_window(self, window):
         self.window = window
@@ -3442,6 +3443,31 @@ class WebImageProcessorService(ImageProcessorApp):
         except OSError as e:
             return {'ok': False, 'error': f'无法打开输出目录：{str(e)}'}
 
+    def get_user_language(self):
+        saved = get_saved_language()
+        sys_lang = get_system_language()
+        effective = saved if saved else sys_lang
+        self.current_language = effective
+        return {
+            'ok': True,
+            'saved_language': saved,
+            'system_language': sys_lang,
+            'effective_language': effective,
+        }
+
+    def set_user_language(self, lang):
+        if lang in ('zh-CN', 'zh-TW', 'ja', 'en'):
+            self.current_language = lang
+            save_user_language(lang)
+            if self.window:
+                try:
+                    title = APP_TITLES.get(lang, APP_TITLES['zh-CN'])
+                    self.window.set_title(title)
+                except Exception:
+                    pass
+            return {'ok': True, 'language': lang}
+        return {'ok': False, 'error': f'Invalid language: {lang}'}
+
 
 class WebImageProcessorBridge:
     """仅暴露给 JavaScript 的窄接口，避免 Tk 继承成员影响 pywebview 反射。"""
@@ -3494,6 +3520,12 @@ class WebImageProcessorBridge:
     def get_system_language(self):
         return {'ok': True, 'language': get_system_language()}
 
+    def get_user_language(self):
+        return self.service.get_user_language()
+
+    def set_user_language(self, lang):
+        return self.service.set_user_language(lang)
+
 
 def _resource_path(*parts):
     root_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
@@ -3535,6 +3567,88 @@ def get_system_language():
     return 'zh-CN'
 
 
+APP_TITLES = {
+    'zh-CN': '智能图像预处理工具 v3.4',
+    'zh-TW': '智能圖像預處理工具 v3.4',
+    'ja': 'スマート画像前処理ツール v3.4',
+    'en': 'Smart Image Preprocessor v3.4',
+}
+
+QUIT_CONFIRMATIONS = {
+    'zh-CN': '任务可能仍在运行，确定要退出吗？',
+    'zh-TW': '任務可能仍在運行，確定要退出嗎？',
+    'ja': 'タスクが実行中の可能性があります。終了しますか？',
+    'en': 'A task may still be running. Are you sure you want to quit?',
+}
+
+
+def get_config_dir():
+    """获取用户配置存储目录，优先使用 %APPDATA%/c2bw 或 ~/.c2bw"""
+    app_data = os.environ.get('APPDATA')
+    if app_data:
+        config_dir = os.path.join(app_data, 'c2bw')
+    else:
+        config_dir = os.path.join(os.path.expanduser('~'), '.c2bw')
+    return config_dir
+
+
+def get_config_path():
+    """获取配置文件路径。若程序同目录下已有 c2bw_config.json 则优先使用（便携模式），否则保存在用户配置目录中。"""
+    try:
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(os.path.abspath(sys.executable))
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+        local_config = os.path.join(base_dir, 'c2bw_config.json')
+        if os.path.exists(local_config):
+            return local_config
+    except Exception:
+        pass
+    return os.path.join(get_config_dir(), 'config.json')
+
+
+def load_user_config():
+    """读取用户配置字典"""
+    config_path = get_config_path()
+    if os.path.exists(config_path):
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def save_user_config(cfg):
+    """保存用户配置字典"""
+    config_path = get_config_path()
+    try:
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(cfg, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception:
+        return False
+
+
+def get_saved_language():
+    """获取用户已保存的语言习惯；若无有效设置则返回空字符串"""
+    cfg = load_user_config()
+    lang = cfg.get('language')
+    if lang in ('zh-CN', 'zh-TW', 'ja', 'en'):
+        return lang
+    return ''
+
+
+def save_user_language(lang):
+    """保存用户的语言习惯（保持关闭时的语言状态）"""
+    if lang in ('zh-CN', 'zh-TW', 'ja', 'en'):
+        cfg = load_user_config()
+        cfg['language'] = lang
+        return save_user_config(cfg)
+    return False
+
+
 def _get_free_port():
     """向操作系统内核请求一个当前未被占用的随机空闲临时端口。"""
     try:
@@ -3550,22 +3664,12 @@ def launch_web_ui():
     bridge = WebImageProcessorBridge(service)
     index_path = _resource_path('webui', 'index.html')
     sys_lang = get_system_language()
+    saved_lang = get_saved_language()
+    current_lang = saved_lang if saved_lang else sys_lang
+    service.current_language = current_lang
 
-    app_titles = {
-        'zh-CN': '智能图像预处理工具 v3.4',
-        'zh-TW': '智能圖像預處理工具 v3.4',
-        'ja': 'スマート画像前処理ツール v3.4',
-        'en': 'Smart Image Preprocessor v3.4',
-    }
-    quit_confirmations = {
-        'zh-CN': '任务可能仍在运行，确定要退出吗？',
-        'zh-TW': '任務可能仍在運行，確定要退出嗎？',
-        'ja': 'タスクが実行中の可能性があります。終了しますか？',
-        'en': 'A task may still be running. Are you sure you want to quit?',
-    }
-
-    app_title = app_titles.get(sys_lang, app_titles['zh-CN'])
-    quit_msg = quit_confirmations.get(sys_lang, quit_confirmations['zh-CN'])
+    app_title = APP_TITLES.get(current_lang, APP_TITLES['zh-CN'])
+    quit_msg = QUIT_CONFIRMATIONS.get(current_lang, QUIT_CONFIRMATIONS['zh-CN'])
 
     window = webview.create_window(
         app_title,
@@ -3598,7 +3702,19 @@ def launch_web_ui():
         bridge.poll_events,
         bridge.open_output_folder,
         bridge.get_system_language,
+        bridge.get_user_language,
+        bridge.set_user_language,
     )
+
+    def _on_closing():
+        try:
+            if service.current_language:
+                save_user_language(service.current_language)
+        except Exception:
+            pass
+
+    window.events.closing += _on_closing
+
     # 设置 Windows 原生窗口与任务栏图标
     if sys.platform == 'win32':
         try:
@@ -3633,6 +3749,10 @@ def launch_web_ui():
 
 def launch_tkinter_ui():
     root = tk.Tk()
+    saved_lang = get_saved_language()
+    current_lang = saved_lang if saved_lang else get_system_language()
+    app_title = APP_TITLES.get(current_lang, APP_TITLES['zh-CN'])
+    root.title(app_title)
     icon_file = _resource_path('hanji.ico')
     if os.path.exists(icon_file):
         try:

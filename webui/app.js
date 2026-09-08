@@ -166,15 +166,13 @@
         vm.bridgeReady = true;
         vm.status = vm.$t('statusReady');
 
-        // 若用户未手动设置语言，尝试从后端同步操作系统语言
+        // 从后端同步用户的语言习惯（保持关闭时的语言状态；未设置时自动适配系统语言）
         try {
-          if (!localStorage.getItem('c2bw_language')) {
-            vm.callApi('get_system_language').then(function (res) {
-              if (res && res.language) {
-                vm.changeLanguage(res.language);
-              }
-            }).catch(function () {});
-          }
+          vm.callApi('get_user_language').then(function (res) {
+            if (res && res.effective_language) {
+              vm.changeLanguage(res.effective_language, false);
+            }
+          }).catch(function () {});
         } catch (e) {}
 
         vm.checkForUpdates();
@@ -254,6 +252,14 @@
           vm.applyDroppedPath(target);
         }
       });
+
+      window.addEventListener('beforeunload', function () {
+        if (vm.currentLang) {
+          try {
+            vm.callApi('set_user_language', [vm.currentLang]);
+          } catch (e) {}
+        }
+      });
     },
     beforeDestroy: function () {
       if (this.pollTimer) {
@@ -267,12 +273,15 @@
       $t: function (key, params) {
         return window.c2bwI18n ? window.c2bwI18n.t(key, params, this.currentLang) : key;
       },
-      changeLanguage: function (lang) {
+      changeLanguage: function (lang, persist) {
         if (window.c2bwI18n) {
           this.currentLang = window.c2bwI18n.setLanguage(lang);
           document.title = this.$t('appTitle');
           if (this.phase === 'idle' && !this.processing) {
             this.status = this.$t('statusReady');
+          }
+          if (persist !== false) {
+            this.callApi('set_user_language', [lang]).catch(function () {});
           }
         }
       },
