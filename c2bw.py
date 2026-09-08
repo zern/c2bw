@@ -3706,15 +3706,6 @@ def launch_web_ui():
         bridge.set_user_language,
     )
 
-    def _on_closing():
-        try:
-            if service.current_language:
-                save_user_language(service.current_language)
-        except Exception:
-            pass
-
-    window.events.closing += _on_closing
-
     # 设置 Windows 原生窗口与任务栏图标
     if sys.platform == 'win32':
         try:

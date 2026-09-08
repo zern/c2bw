@@ -252,14 +252,6 @@
           vm.applyDroppedPath(target);
         }
       });
-
-      window.addEventListener('beforeunload', function () {
-        if (vm.currentLang) {
-          try {
-            vm.callApi('set_user_language', [vm.currentLang]);
-          } catch (e) {}
-        }
-      });
     },
     beforeDestroy: function () {
       if (this.pollTimer) {
