@@ -2023,9 +2023,29 @@ class ImageProcessorApp:
                         NameObject('/BlackIs1'): BooleanObject(True if photometric != 0 else False),
                     }),
                 })
+            elif ext in ('.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c'):
+                # JPEG 2000 原格式流：直接保留源数据，以 /JPXDecode 滤镜封装，100% 保持原始格式与品质
+                with open(image_path, 'rb') as f:
+                    jp2_data = f.read()
+
+                img_obj = DecodedStreamObject()
+                img_obj.set_data(jp2_data)
+                img_dict = {
+                    NameObject('/Type'): NameObject('/XObject'),
+                    NameObject('/Subtype'): NameObject('/Image'),
+                    NameObject('/Width'): NumberObject(w),
+                    NameObject('/Height'): NumberObject(h),
+                    NameObject('/Filter'): NameObject('/JPXDecode'),
+                }
+                if im.mode == 'L':
+                    img_dict[NameObject('/ColorSpace')] = NameObject('/DeviceGray')
+                    img_dict[NameObject('/BitsPerComponent')] = NumberObject(8)
+                elif im.mode in ('RGB', 'RGBA'):
+                    img_dict[NameObject('/ColorSpace')] = NameObject('/DeviceRGB')
+                    img_dict[NameObject('/BitsPerComponent')] = NumberObject(8)
+                img_obj.update(img_dict)
             else:
                 # 彩色或灰度图：使用 /DCTDecode (JPEG) 编码
-                ext = os.path.splitext(image_path)[1].lower()
                 if ext in ('.jpg', '.jpeg') and im.mode in ('RGB', 'L'):
                     with open(image_path, 'rb') as f:
                         jpg_data = f.read()
@@ -3181,6 +3201,24 @@ def launch_web_ui():
         bridge.poll_events,
         bridge.open_output_folder,
     )
+    # 设置 Windows 原生窗口与任务栏图标
+    if sys.platform == 'win32':
+        try:
+            import webview.platforms.winforms as winforms_platform
+            from System.Drawing import Icon as NetIcon
+            icon_file = _resource_path('hanji.ico')
+            if os.path.exists(icon_file):
+                orig_form_init = winforms_platform.BrowserView.BrowserForm.__init__
+                def _patched_form_init(self, *args, **kwargs):
+                    orig_form_init(self, *args, **kwargs)
+                    try:
+                        self.Icon = NetIcon(icon_file)
+                    except Exception:
+                        pass
+                winforms_platform.BrowserView.BrowserForm.__init__ = _patched_form_init
+        except Exception:
+            pass
+
     # Win7 没有 WebView2，使用系统 IE11/MSHTML；新系统优先使用 WebView2。
     legacy_windows = sys.platform == 'win32' and sys.getwindowsversion().major <= 6
     webview.start(
@@ -3195,11 +3233,25 @@ def launch_web_ui():
 
 def launch_tkinter_ui():
     root = tk.Tk()
+    icon_file = _resource_path('hanji.ico')
+    if os.path.exists(icon_file):
+        try:
+            root.iconbitmap(icon_file)
+        except Exception:
+            pass
     app = ImageProcessorApp(root)
     root.mainloop()
 
 
 if __name__ == "__main__":
+    # 在 Windows 上设置明确的 AppUserModelID，确保任务栏正确显示程序独立图标而非默认宿主图标
+    if sys.platform == 'win32':
+        try:
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('c2bw.imageprocessor.gui.v33')
+        except Exception:
+            pass
+
     if '--tk' in sys.argv or '--classic' in sys.argv:
         launch_tkinter_ui()
     else:

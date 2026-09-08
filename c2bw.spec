@@ -11,6 +11,7 @@ os.environ['PATH'] = os.getcwd() + os.pathsep + os.environ.get('PATH', '')
 
 added_datas = [
     ('webui', 'webui'),
+    ('hanji.ico', '.'),
     (os.path.join(pythonnet_dir, 'runtime'), 'pythonnet/runtime'),
     (os.path.join(clr_loader_dir, 'ffi', 'dlls'), 'clr_loader/ffi/dlls'),
 ]
