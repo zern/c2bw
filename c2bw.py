@@ -226,7 +226,7 @@ class ImageProcessorApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("智能图像预处理工具 v3.3")
+        self.root.title("智能图像预处理工具 v3.4")
         # 在较矮的屏幕上留出系统任务栏空间，其他内容通过滚动条访问。
         window_height = min(820, max(480, self.root.winfo_screenheight() - 100))
         self.root.geometry(f"700x{window_height}")
@@ -2555,15 +2555,15 @@ class WebImageProcessorService(ImageProcessorApp):
         try:
             request = urllib.request.Request(
                 self.UPDATE_INFO_URL,
-                headers={'User-Agent': 'SHUGE-C2BW/3.3'},
+                headers={'User-Agent': 'SHUGE-C2BW/3.4'},
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 data = json.loads(response.read().decode('utf-8-sig'))
             if not isinstance(data, dict) or not data.get('version'):
                 raise ValueError('服务器返回的更新信息格式无效。')
-            return {'ok': True, 'current_version': '3.3.0.0', 'update': data, 'source': 'server'}
+            return {'ok': True, 'current_version': '3.4.0.0', 'update': data, 'source': 'server'}
         except Exception:
-            return {'ok': False, 'current_version': '3.3.0.0'}
+            return {'ok': False, 'current_version': '3.4.0.0'}
 
     def open_download_url(self, url):
         try:
@@ -3171,7 +3171,7 @@ def launch_web_ui():
     bridge = WebImageProcessorBridge(service)
     index_path = _resource_path('webui', 'index.html')
     window = webview.create_window(
-        '智能图像预处理工具 v3.3',
+        '智能图像预处理工具 v3.4',
         url=index_path,
         # 同时使用显式 expose，避免部分 Win7/MSHTML 环境在反射继承类时
         # 生成空的 API 列表。
@@ -3248,7 +3248,7 @@ if __name__ == "__main__":
     if sys.platform == 'win32':
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('c2bw.imageprocessor.gui.v33')
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('c2bw.imageprocessor.gui.v34')
         except Exception:
             pass
 

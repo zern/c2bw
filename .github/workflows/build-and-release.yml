@@ -38,8 +38,8 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
           python -m PyInstaller --noconfirm --clean c2bw.spec
-          Copy-Item "dist/智能图像预处理工具 v3.3.exe" "dist/c2bw-windows-x64.exe" -Force
-          Copy-Item "dist/智能图像预处理工具 v3.3.exe" "dist/智能图像预处理工具_v3.3_Windows.exe" -Force
+          Copy-Item "dist/智能图像预处理工具 v3.4.exe" "dist/c2bw-windows-x64.exe" -Force
+          Copy-Item "dist/智能图像预处理工具 v3.4.exe" "dist/智能图像预处理工具_v3.4_Windows.exe" -Force
 
       # 2. 构建 Windows 7 专用独立版 (Python 3.8 + pythonnet)
       - name: Setup Python 3.8 for Windows 7
@@ -56,8 +56,8 @@ jobs:
           if (Test-Path $dll) { Copy-Item $dll . -Force }
           python -m PyInstaller --noconfirm --clean c2bw_win7.spec
           if (Test-Path "Python.Runtime.dll") { Remove-Item "Python.Runtime.dll" -Force }
-          Copy-Item "dist/智能图像预处理工具 v3.3_Win7.exe" "dist/c2bw-windows7-x64.exe" -Force
-          Copy-Item "dist/智能图像预处理工具 v3.3_Win7.exe" "dist/智能图像预处理工具_v3.3_Windows7.exe" -Force
+          Copy-Item "dist/智能图像预处理工具 v3.4_Win7.exe" "dist/c2bw-windows7-x64.exe" -Force
+          Copy-Item "dist/智能图像预处理工具 v3.4_Win7.exe" "dist/智能图像预处理工具_v3.4_Windows7.exe" -Force
 
       - name: Generate Windows Checksums
         shell: pwsh
@@ -70,10 +70,10 @@ jobs:
           name: windows-binaries
           path: |
             dist/c2bw-windows-x64.exe
-            dist/智能图像预处理工具_v3.3_Windows.exe
+            dist/智能图像预处理工具_v3.4_Windows.exe
             dist/c2bw-windows-x64.sha256
             dist/c2bw-windows7-x64.exe
-            dist/智能图像预处理工具_v3.3_Windows7.exe
+            dist/智能图像预处理工具_v3.4_Windows7.exe
             dist/c2bw-windows7-x64.sha256
           if-no-files-found: error
 
@@ -109,8 +109,8 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean c2bw_macos.spec
           cp dist/c2bw "dist/c2bw-macos-${{ matrix.arch }}"
-          cp dist/c2bw "dist/智能图像预处理工具_v3.3_macOS_${{ matrix.arch }}"
-          chmod +x "dist/c2bw-macos-${{ matrix.arch }}" "dist/智能图像预处理工具_v3.3_macOS_${{ matrix.arch }}"
+          cp dist/c2bw "dist/智能图像预处理工具_v3.4_macOS_${{ matrix.arch }}"
+          chmod +x "dist/c2bw-macos-${{ matrix.arch }}" "dist/智能图像预处理工具_v3.4_macOS_${{ matrix.arch }}"
 
       - name: Verify architecture
         run: |
@@ -126,7 +126,7 @@ jobs:
           name: macos-${{ matrix.arch }}-binary
           path: |
             dist/c2bw-macos-${{ matrix.arch }}
-            dist/智能图像预处理工具_v3.3_macOS_${{ matrix.arch }}
+            dist/智能图像预处理工具_v3.4_macOS_${{ matrix.arch }}
             dist/c2bw-macos-${{ matrix.arch }}.sha256
           if-no-files-found: error
 
@@ -163,8 +163,8 @@ jobs:
         run: |
           python -m PyInstaller --noconfirm --clean c2bw_linux.spec
           cp dist/c2bw dist/c2bw-linux-x64
-          cp dist/c2bw dist/智能图像预处理工具_v3.3_Linux_x64
-          chmod +x dist/c2bw-linux-x64 dist/智能图像预处理工具_v3.3_Linux_x64
+          cp dist/c2bw dist/智能图像预处理工具_v3.4_Linux_x64
+          chmod +x dist/c2bw-linux-x64 dist/智能图像预处理工具_v3.4_Linux_x64
 
       - name: Verify executable
         run: |
@@ -180,7 +180,7 @@ jobs:
           name: linux-binary
           path: |
             dist/c2bw-linux-x64
-            dist/智能图像预处理工具_v3.3_Linux_x64
+            dist/智能图像预处理工具_v3.4_Linux_x64
             dist/c2bw-linux-x64.sha256
           if-no-files-found: error
 

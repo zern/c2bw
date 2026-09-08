@@ -52,7 +52,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='智能图像预处理工具 v3.3',
+    name='智能图像预处理工具 v3.4',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
