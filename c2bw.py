@@ -17,6 +17,7 @@ import re
 import json
 import webbrowser
 import urllib.request
+import socket
 import numpy as np
 from PIL import Image, JpegImagePlugin, PdfImagePlugin, Jpeg2KImagePlugin  # 显式导入以确保打包程序包含 PDF/JPEG2000 编码器。
 from pypdf import PdfReader, PdfWriter
@@ -3166,6 +3167,16 @@ def _resource_path(*parts):
     return os.path.join(root_dir, *parts)
 
 
+def _get_free_port():
+    """向操作系统内核请求一个当前未被占用的随机空闲临时端口。"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(('127.0.0.1', 0))
+            return s.getsockname()[1]
+    except Exception:
+        return None
+
+
 def launch_web_ui():
     service = WebImageProcessorService()
     bridge = WebImageProcessorBridge(service)
@@ -3221,9 +3232,11 @@ def launch_web_ui():
 
     # Win7 没有 WebView2，使用系统 IE11/MSHTML；新系统优先使用 WebView2。
     legacy_windows = sys.platform == 'win32' and sys.getwindowsversion().major <= 6
+    free_port = _get_free_port()
     webview.start(
         gui='mshtml' if legacy_windows else None,
         http_server=True,
+        http_port=free_port,
         private_mode=True,
         localization={
             'global.quitConfirmation': '任务可能仍在运行，确定要退出吗？',
