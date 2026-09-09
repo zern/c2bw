@@ -537,6 +537,7 @@ def get_backend_text(key, lang='zh-CN', **kwargs):
 
 class ImageProcessorApp:
     PDF_APPLICATION_NAME = "SHUGE.ORG"
+    PDF_SPEC_VERSION = b"%PDF-1.5"
 
     def __init__(self, root):
         self.root = root
@@ -2405,6 +2406,7 @@ class ImageProcessorApp:
         temporary_path = f"{pdf_path}.tmp"
         try:
             writer = PdfWriter()
+            writer.pdf_header = getattr(self, 'PDF_SPEC_VERSION', b'%PDF-1.5')
             writer.add_metadata({
                 '/Creator': self.PDF_APPLICATION_NAME,
                 '/Producer': self.PDF_APPLICATION_NAME,
@@ -2464,6 +2466,7 @@ class ImageProcessorApp:
 
                 writer = PdfWriter()
                 writer.clone_document_from_reader(reader)
+                writer.pdf_header = getattr(ImageProcessorApp, 'PDF_SPEC_VERSION', b'%PDF-1.5')
                 first_page = writer.pages[0].indirect_reference
                 if first_page is None:
                     raise ValueError("PDF 首页引用无效。")
