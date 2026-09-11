@@ -6,3 +6,6 @@ dist_*/
 __pycache__/
 *.pyc
 Python.Runtime.dll
+.buildozer/
+bin/
+
