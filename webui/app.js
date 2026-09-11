@@ -279,6 +279,23 @@
       },
       callApi: function (method, args) {
         var vm = this;
+        // 智能环境探测：若显式处于 HTTP 模式或处于 Android 移动端且未注入 pywebview，直接启用 HTTP REST API
+        if (!window.__c2bw_is_http_mode__ && typeof navigator !== 'undefined' && navigator.userAgent &&
+            (navigator.userAgent.indexOf('Android') !== -1 || navigator.userAgent.indexOf('Mobile') !== -1) &&
+            !window.pywebview) {
+          window.__c2bw_is_http_mode__ = true;
+        }
+
+        if (window.__c2bw_is_http_mode__) {
+          return fetch('/api/' + method, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ args: args || [] })
+          }).then(function (res) {
+            return res.json();
+          });
+        }
+
         var attempts = 0;
         return new Promise(function (resolve, reject) {
           function invoke() {
@@ -292,12 +309,26 @@
               }
               return;
             }
+
             attempts += 1;
+            // 若多次等待后 pywebview 仍未注入且在 HTTP/HTTPS 服务下，自动降级切换为本地 REST API
+            if (attempts >= 10 && !window.pywebview && window.location && window.location.protocol.indexOf('http') === 0) {
+              window.__c2bw_is_http_mode__ = true;
+              fetch('/api/' + method, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ args: args || [] })
+              }).then(function (res) {
+                return res.json();
+              }).then(resolve, reject);
+              return;
+            }
+
             if (attempts >= 25) {
               reject(new Error(vm.$t('statusConnecting')));
               return;
             }
-            window.setTimeout(invoke, 200);
+            window.setTimeout(invoke, 100);
           }
           invoke();
         });

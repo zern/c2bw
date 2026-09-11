@@ -22,6 +22,10 @@ a = Analysis(
     binaries=[],
     datas=added_datas,
     hiddenimports=[
+        'c2bw',
+        'c2bw.core',
+        'c2bw.service',
+        'c2bw.desktop',
         'PIL.JpegImagePlugin',
         'PIL.PdfImagePlugin',
         'PIL.Jpeg2KImagePlugin',
