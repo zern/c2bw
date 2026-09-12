@@ -635,12 +635,17 @@ class ImageProcessorService:
         self._sync_window_localization(effective)
         return {
             'ok': True,
+            'language': effective,
             'saved_language': saved,
             'system_language': sys_lang,
             'effective_language': effective,
         }
 
     def set_user_language(self, lang):
+        if isinstance(lang, (list, tuple)) and len(lang) > 0:
+            lang = lang[0]
+        if isinstance(lang, str):
+            lang = lang.strip()
         if lang in ('zh-CN', 'zh-TW', 'ja', 'en'):
             self.current_language = lang
             save_user_language(lang)

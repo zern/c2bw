@@ -1107,10 +1107,13 @@ onMounted(async () => {
   // 同步用户语言设置
   try {
     const langRes = await callApi('get_user_language')
-    if (langRes && langRes.ok && langRes.language) {
-      setLanguage(langRes.language)
+    const targetLang = langRes && (langRes.effective_language || langRes.language || langRes.saved_language)
+    if (targetLang) {
+      setLanguage(targetLang)
     }
-  } catch (e) {}
+  } catch (e) {
+    console.error('Failed to get user language from backend:', e)
+  }
 
   pollTimer = setInterval(pollEvents, 250)
 })

@@ -377,11 +377,17 @@ def launch_web_ui():
     # Win7 没有 WebView2，使用系统 IE11/MSHTML；新系统优先使用 WebView2。
     legacy_windows = sys.platform == 'win32' and sys.getwindowsversion().major <= 6
     free_port = _get_free_port()
+    webview_data_dir = os.path.join(get_config_dir(), 'webview')
+    try:
+        os.makedirs(webview_data_dir, exist_ok=True)
+    except Exception:
+        pass
     webview.start(
         gui='mshtml' if legacy_windows else None,
         http_server=True,
         http_port=free_port,
-        private_mode=True,
+        private_mode=False,
+        storage_path=webview_data_dir,
         localization={
             'global.quitConfirmation': quit_msg,
         },
