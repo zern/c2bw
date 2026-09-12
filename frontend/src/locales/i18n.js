@@ -1,8 +1,6 @@
-// Multi-language support (i18n) for c2bw
-(function () {
-  'use strict';
+import { ref, computed } from 'vue'
 
-  var translations = {
+export const translations = {
   "zh-CN": {
     "langName": "简体中文",
     "appTitle": "智能图像预处理工具",
@@ -49,6 +47,15 @@
     "formatKeep": "保持原格式与品质",
     "formatJpg80": "转为 JPG（质量 80）",
     "tipNonBin": "仅裁切 JPEG 时保留来源量化表和色度抽样。",
+    "labelSizeOpt": "文件大小优化",
+    "optOriginal": "原大图片（无优化）",
+    "optMobile": "精简尺寸（适合手机）",
+    "optCustom": "自定义参数",
+    "tipOriginal": "默认项不做调整，保持原始尺寸与格式输出。",
+    "tipMobile": "裁切前使用最优算法缩小至 2160px 宽（小于 2160px 不放大，保持原比例），输出为质量 75 的渐进式 JPEG。",
+    "tipCustom": "裁切前按设定比例缩小，并输出为指定质量的渐进式 JPEG。",
+    "labelCustomScale": "图片尺寸",
+    "labelCustomQuality": "JPEG 质量",
     "secCrop": "分页处理",
     "labelExcludeRatio": "排除单页比例",
     "labelCropPercent": "分割比例",
@@ -80,6 +87,8 @@
     "chkKeepImages": "合成PDF后保留处理后的图片",
     "tagDirectPdf": "保持原图品质，直接打包为 PDF",
     "tagJpgPdf": "先转换为 JPG(质量80) 再打包为 PDF",
+    "tagMobilePdf": "精简尺寸(2160px, Q75)后打包为 PDF",
+    "tagCustomPdf": "自定义优化后打包为 PDF",
     "tagPdfReconstruct": "处理后自动转为新 PDF 并清理分页图片",
     "tagPdfExtractOnly": "直接提取 PDF 原始图片至同名目录",
     "tagPdfProcessOnly": "仅输出处理后的图片文件夹",
@@ -109,9 +118,9 @@
     "pdfExtractedFollowupTitle": "执行后续预处理",
     "pdfExtractedFollowupMsg": "已成功从 PDF 提取 {count} 张图片到文件夹：\n{dir}\n\n是否立即对此文件夹执行后续裁切、黑白二值化和 PDF 汇总处理？",
     "errSelectPdf": "请先选择待处理的 PDF 文件！",
-    "errSelectTask": "请至少选择一种处理任务（裁切或黑白二值化）！",
+    "errSelectTask": "请至少选择一种处理任务（裁切、黑白二值化或文件大小优化）！",
     "errSelectSourceDir": "请先选择输入图片目录！",
-    "errSelectAnyTask": "请至少启用一种处理任务（色彩处理或分页裁切），或选择转为 JPG，或勾选合并输出为 PDF！",
+    "errSelectAnyTask": "请至少启用一种处理任务（色彩处理、分页裁切或文件大小优化），或勾选合并输出为 PDF！",
     "confirmCancelTitle": "取消任务",
     "confirmCancelMsg": "取消后会删除本次输出目录及其中的所有文件。确定继续吗？",
     "btnConfirmCancel": "确定取消",
@@ -136,7 +145,9 @@
     "pdfSuffixCroppedBin": "_已裁切_黑白版",
     "pdfSuffixCropped": "_已裁切",
     "pdfSuffixBin": "_黑白版",
-    "pdfSuffixNone": "（请至少勾选一种任务：裁切或黑白二值化）"
+    "pdfSuffixMobile": "_手机优化版",
+    "pdfSuffixCustom": "_已优化",
+    "pdfSuffixNone": "（请至少勾选一种任务：裁切、黑白或大小优化）"
   },
   "zh-TW": {
     "langName": "繁體中文",
@@ -184,6 +195,15 @@
     "formatKeep": "保持原格式與品質",
     "formatJpg80": "轉為 JPG（品質 80）",
     "tipNonBin": "僅裁切 JPEG 時保留來源量化表和色度抽樣。",
+    "labelSizeOpt": "檔案大小優化",
+    "optOriginal": "原大圖片（無優化）",
+    "optMobile": "精簡尺寸（適合手機）",
+    "optCustom": "自訂參數",
+    "tipOriginal": "預設項不做調整，保持原始尺寸與格式輸出。",
+    "tipMobile": "裁切前使用最優演算法縮小至 2160px 寬（小於 2160px 不放大，保持原比例），輸出為品質 75 的漸進式 JPEG。",
+    "tipCustom": "裁切前按設定比例縮小，並輸出為指定品質的漸進式 JPEG。",
+    "labelCustomScale": "圖片尺寸",
+    "labelCustomQuality": "JPEG 品質",
     "secCrop": "分頁處理",
     "labelExcludeRatio": "排除單頁比例",
     "labelCropPercent": "分割比例",
@@ -215,6 +235,8 @@
     "chkKeepImages": "合成PDF後保留處理後的圖片",
     "tagDirectPdf": "保持原圖品質，直接打包為 PDF",
     "tagJpgPdf": "先轉換為 JPG(品質80) 再打包為 PDF",
+    "tagMobilePdf": "精簡尺寸(2160px, Q75)後打包為 PDF",
+    "tagCustomPdf": "自訂優化後打包為 PDF",
     "tagPdfReconstruct": "處理後自動轉為新 PDF 並清理分頁圖片",
     "tagPdfExtractOnly": "直接提取 PDF 原始圖片至同名目錄",
     "tagPdfProcessOnly": "僅輸出處理後的圖片資料夾",
@@ -244,9 +266,9 @@
     "pdfExtractedFollowupTitle": "執行後續預處理",
     "pdfExtractedFollowupMsg": "已成功從 PDF 提取 {count} 張圖片到資料夾：\n{dir}\n\n是否立即對此資料夾執行後續裁切、黑白二值化和 PDF 匯總處理？",
     "errSelectPdf": "請先選擇待處理的 PDF 檔案！",
-    "errSelectTask": "請至少選擇一種處理任務（裁切或黑白二值化）！",
+    "errSelectTask": "請至少選擇一種處理任務（裁切、黑白二值化或檔案大小優化）！",
     "errSelectSourceDir": "請先選擇輸入圖片目錄！",
-    "errSelectAnyTask": "請至少啟用一種處理任務（色彩處理或分頁裁切），或選擇轉為 JPG，或勾選合併輸出為 PDF！",
+    "errSelectAnyTask": "請至少啟用一種處理任務（色彩處理、分頁裁切或檔案大小優化），或勾選合併輸出為 PDF！",
     "confirmCancelTitle": "取消任務",
     "confirmCancelMsg": "取消後會刪除本次輸出目錄及其中的所有檔案。確定繼續嗎？",
     "btnConfirmCancel": "確定取消",
@@ -271,7 +293,9 @@
     "pdfSuffixCroppedBin": "_已裁切_黑白版",
     "pdfSuffixCropped": "_已裁切",
     "pdfSuffixBin": "_黑白版",
-    "pdfSuffixNone": "（請至少勾選一種任務：裁切或黑白二值化）"
+    "pdfSuffixMobile": "_手機優化版",
+    "pdfSuffixCustom": "_已優化",
+    "pdfSuffixNone": "（請至少勾選一種任務：裁切、黑白或大小優化）"
   },
   "ja": {
     "langName": "日本語",
@@ -319,6 +343,15 @@
     "formatKeep": "元の形式と品質を維持",
     "formatJpg80": "JPGに変換 (品質 80)",
     "tipNonBin": "JPEG裁断時のみ元の量子化テーブルとサンプリングを保持。",
+    "labelSizeOpt": "ファイルサイズ最適化",
+    "optOriginal": "原寸大（最適化なし）",
+    "optMobile": "縮小サイズ（スマホ向け）",
+    "optCustom": "カスタム設定",
+    "tipOriginal": "サイズ変更を行わず、元の寸法と形式で出力します。",
+    "tipMobile": "裁断前に最適なリサンプリングで幅2160pxに縮小（2160px以下は拡大せず、比率維持）、品質75のプログレッシブJPEGで保存します。",
+    "tipCustom": "裁断前に指定比率で縮小し、指定品質のプログレッシブJPEGで保存します。",
+    "labelCustomScale": "画像サイズ",
+    "labelCustomQuality": "JPEG 品質",
     "secCrop": "ページ分割処理",
     "labelExcludeRatio": "単一ページ除外比率",
     "labelCropPercent": "分割比率",
@@ -350,6 +383,8 @@
     "chkKeepImages": "PDF生成後に処理済み画像を保持",
     "tagDirectPdf": "元の品質を保持し、直接PDFにパック",
     "tagJpgPdf": "JPG(品質80)に変換後、PDFにパック",
+    "tagMobilePdf": "スマホ向け最適化後にPDFへパック",
+    "tagCustomPdf": "カスタム最適化後にPDFへパック",
     "tagPdfReconstruct": "処理後に新PDFへ自動変換し一時画像を消去",
     "tagPdfExtractOnly": "PDFから元画像を同名フォルダに直接抽出",
     "tagPdfProcessOnly": "処理済み画像フォルダのみ出力",
@@ -379,9 +414,9 @@
     "pdfExtractedFollowupTitle": "後続の前処理を実行",
     "pdfExtractedFollowupMsg": "PDFから {count} 枚の画像をフォルダに正常抽出しました：\n{dir}\n\nこのフォルダに対して直ちに裁断・2値化・PDF統合処理を実行しますか？",
     "errSelectPdf": "処理対象のPDFファイルを選択してください！",
-    "errSelectTask": "処理タスク（裁断または2値化）を少なくとも1つ選択してください！",
+    "errSelectTask": "処理タスク（裁断、2値化またはサイズ最適化）を少なくとも1つ選択してください！",
     "errSelectSourceDir": "入力画像フォルダを選択してください！",
-    "errSelectAnyTask": "処理タスク（色処理または裁断）を有効にするか、JPG変換またはPDF出力を選択してください！",
+    "errSelectAnyTask": "処理タスク（色処理、裁断またはサイズ最適化）を有効にするか、PDF出力を選択してください！",
     "confirmCancelTitle": "タスクのキャンセル",
     "confirmCancelMsg": "キャンセルすると、今回の出力フォルダとその中の全ファイルが削除されます。続行しますか？",
     "btnConfirmCancel": "キャンセル確定",
@@ -406,7 +441,9 @@
     "pdfSuffixCroppedBin": "_裁断済み_2値化",
     "pdfSuffixCropped": "_裁断済み",
     "pdfSuffixBin": "_2値化",
-    "pdfSuffixNone": "（タスクを1つ以上選択してください：裁断または2値化）"
+    "pdfSuffixMobile": "_スマホ最適化版",
+    "pdfSuffixCustom": "_最適化版",
+    "pdfSuffixNone": "（タスクを1つ以上選択してください：裁断、2値化または最適化）"
   },
   "en": {
     "langName": "English",
@@ -454,6 +491,15 @@
     "formatKeep": "Keep Original Format & Quality",
     "formatJpg80": "Convert to JPG (Quality 80)",
     "tipNonBin": "Preserves source quantization table & chroma subsampling when cropping JPEG.",
+    "labelSizeOpt": "File Size Optimization",
+    "optOriginal": "Original Size (No Optimization)",
+    "optMobile": "Compact Size (For Mobile)",
+    "optCustom": "Custom Parameters",
+    "tipOriginal": "No resize or recompression; preserves original dimensions and format.",
+    "tipMobile": "Resizes to 2160px width before crop (no upscaling for width ≤ 2160px, keeps aspect ratio), saved as progressive JPEG Q75.",
+    "tipCustom": "Resizes by chosen percentage before crop, saved as progressive JPEG with custom quality.",
+    "labelCustomScale": "Image Scale",
+    "labelCustomQuality": "JPEG Quality",
     "secCrop": "Page Split & Crop",
     "labelExcludeRatio": "Single-Page Ratio",
     "labelCropPercent": "Split Ratio",
@@ -485,6 +531,8 @@
     "chkKeepImages": "Keep processed images after PDF merge",
     "tagDirectPdf": "Preserve original quality, pack directly to PDF",
     "tagJpgPdf": "Convert to JPG (Q80) then pack to PDF",
+    "tagMobilePdf": "Compact size (2160px, Q75) then pack to PDF",
+    "tagCustomPdf": "Custom optimize then pack to PDF",
     "tagPdfReconstruct": "Auto-convert to new PDF and clean temp images",
     "tagPdfExtractOnly": "Directly extract raw images to same-name folder",
     "tagPdfProcessOnly": "Output processed image folder only",
@@ -514,9 +562,9 @@
     "pdfExtractedFollowupTitle": "Execute Subsequent Preprocessing",
     "pdfExtractedFollowupMsg": "Successfully extracted {count} images from PDF to folder:\n{dir}\n\nDo you want to immediately execute crop, binarization, and PDF packing on this folder?",
     "errSelectPdf": "Please select a PDF file first!",
-    "errSelectTask": "Please select at least one task (crop or binarize)!",
+    "errSelectTask": "Please select at least one task (crop, binarize, or size optimize)!",
     "errSelectSourceDir": "Please select input image directory first!",
-    "errSelectAnyTask": "Please enable at least one task (color or crop), or convert to JPG, or merge into PDF!",
+    "errSelectAnyTask": "Please enable at least one task (color, crop, or size optimize), or merge into PDF!",
     "confirmCancelTitle": "Cancel Task",
     "confirmCancelMsg": "Cancelling will delete the current output directory and all files in it. Proceed?",
     "btnConfirmCancel": "Yes, Cancel",
@@ -541,88 +589,93 @@
     "pdfSuffixCroppedBin": "_Cropped_BW",
     "pdfSuffixCropped": "_Cropped",
     "pdfSuffixBin": "_BW",
-    "pdfSuffixNone": "(Please select at least one task: crop or binarize)"
-  }
-};
+    "pdfSuffixMobile": "_Mobile_Optimized",
+    "pdfSuffixCustom": "_Optimized",
+    "pdfSuffixNone": "(Please select at least one task: crop, binarize, or size optimize)"
+  },
+}
 
-  var supportedLanguages = [
-    { code: 'zh-CN', label: '简体中文' },
-    { code: 'zh-TW', label: '繁體中文' },
-    { code: 'ja', label: '日本語' },
-    { code: 'en', label: 'English' }
-  ];
+export const supportedLanguages = [
+  { code: 'zh-CN', label: '简体中文' },
+  { code: 'zh-TW', label: '繁體中文' },
+  { code: 'ja', label: '日本語' },
+  { code: 'en', label: 'English' }
+]
 
-  function detectSystemLanguage() {
-    try {
-      var navLang = (navigator.languages && navigator.languages[0]) ||
-                    navigator.language ||
-                    navigator.userLanguage ||
-                    '';
-      navLang = String(navLang).toLowerCase();
-      if (navLang.indexOf('zh-tw') >= 0 || navLang.indexOf('zh-hk') >= 0 || navLang.indexOf('zh-mo') >= 0 || navLang.indexOf('hant') >= 0) {
-        return 'zh-TW';
-      }
-      if (navLang.indexOf('zh') >= 0) {
-        return 'zh-CN';
-      }
-      if (navLang.indexOf('ja') >= 0) {
-        return 'ja';
-      }
-      if (navLang.indexOf('en') >= 0) {
-        return 'en';
-      }
-    } catch (e) {}
-    // 未匹配时默认简体中文
-    return 'zh-CN';
-  }
-
-  function getInitialLanguage() {
-    try {
-      var saved = localStorage.getItem('c2bw_language');
-      if (saved && translations[saved]) {
-        return saved;
-      }
-    } catch (e) {}
-    return detectSystemLanguage();
-  }
-
-  var currentLanguage = getInitialLanguage();
-
-  function t(key, params, lang) {
-    var l = lang || currentLanguage;
-    var dict = translations[l] || translations['zh-CN'];
-    var text = dict[key];
-    if (text === undefined) {
-      text = (translations['zh-CN'] && translations['zh-CN'][key]) || key;
+function detectSystemLanguage() {
+  try {
+    const navLang = String(
+      (navigator.languages && navigator.languages[0]) ||
+      navigator.language ||
+      ''
+    ).toLowerCase()
+    if (navLang.includes('zh-tw') || navLang.includes('zh-hk') || navLang.includes('zh-mo') || navLang.includes('hant')) {
+      return 'zh-TW'
     }
-    if (params && typeof params === 'object') {
-      for (var k in params) {
-        if (Object.prototype.hasOwnProperty.call(params, k)) {
-          text = text.replace(new RegExp('\\{' + k + '\\}', 'g'), params[k]);
-        }
+    if (navLang.includes('zh')) {
+      return 'zh-CN'
+    }
+    if (navLang.includes('ja')) {
+      return 'ja'
+    }
+    if (navLang.includes('en')) {
+      return 'en'
+    }
+  } catch (e) {}
+  return 'zh-CN'
+}
+
+function getInitialLanguage() {
+  try {
+    const saved = localStorage.getItem('c2bw_language')
+    if (saved && translations[saved]) {
+      return saved
+    }
+  } catch (e) {}
+  return detectSystemLanguage()
+}
+
+export const currentLang = ref(getInitialLanguage())
+
+export function t(key, params, lang) {
+  const l = lang || currentLang.value
+  const dict = translations[l] || translations['zh-CN']
+  let text = dict[key]
+  if (text === undefined) {
+    text = (translations['zh-CN'] && translations['zh-CN'][key]) || key
+  }
+  if (params && typeof params === 'object') {
+    for (const k in params) {
+      if (Object.prototype.hasOwnProperty.call(params, k)) {
+        text = text.replace(new RegExp('\\{' + k + '\\}', 'g'), params[k])
       }
     }
-    return text;
   }
+  return text
+}
 
-  function setLanguage(lang) {
-    if (!translations[lang]) {
-      lang = 'zh-CN';
-    }
-    currentLanguage = lang;
-    try {
-      localStorage.setItem('c2bw_language', lang);
-    } catch (e) {}
-    return currentLanguage;
+export function setLanguage(lang) {
+  if (!translations[lang]) {
+    lang = 'zh-CN'
   }
+  currentLang.value = lang
+  try {
+    localStorage.setItem('c2bw_language', lang)
+  } catch (e) {}
+  return currentLang.value
+}
 
-  window.c2bwI18n = {
-    supportedLanguages: supportedLanguages,
-    detectSystemLanguage: detectSystemLanguage,
-    getInitialLanguage: getInitialLanguage,
-    getCurrentLanguage: function () { return currentLanguage; },
-    setLanguage: setLanguage,
-    t: t,
-    translations: translations
-  };
-}());
+export function useI18n() {
+  const currentLanguageLabel = computed(() => {
+    const found = supportedLanguages.find(l => l.code === currentLang.value)
+    return found ? found.label : 'Language'
+  })
+
+  return {
+    currentLang,
+    currentLanguageLabel,
+    supportedLanguages,
+    t,
+    setLanguage
+  }
+}

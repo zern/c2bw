@@ -10,15 +10,17 @@ body {
   margin: 0;
   background: #edf2f7;
   color: #243247;
-  font-family: "Microsoft YaHei", "Segoe UI", Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", "Microsoft YaHei", Arial, sans-serif;
 }
 
 body {
   overflow-y: auto;
 }
 
-[v-cloak] {
-  display: none;
+#app {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
 }
 
 .app-header {
@@ -83,8 +85,8 @@ body {
 .lang-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 10px;
+  gap: 6px;
+  padding: 6px 12px;
   border: 1px solid rgba(255, 255, 255, 0.38);
   border-radius: 6px;
   color: #ffffff;
@@ -103,23 +105,47 @@ body {
   font-size: 14px;
 }
 
-.lang-dropdown-menu .is-active-lang {
-  color: #2f80ed !important;
+.is-active-lang {
+  color: var(--el-color-primary) !important;
   font-weight: 600;
-  background-color: #f0f7ff;
+  background-color: var(--el-color-primary-light-9);
 }
 
-.update-badge { margin-left: 4px; cursor: pointer; }
-.update-icon { color: #ffd166; font-size: 22px; }
-.update-popover .update-title { color: #163c68; font-size: 16px; font-weight: 600; }
-.update-date { margin-top: 5px; color: #8492a6; font-size: 12px; }
-.update-list { margin: 10px 0 14px; padding-left: 18px; color: #475569; line-height: 1.7; }
+.update-badge {
+  margin-left: 4px;
+  cursor: pointer;
+}
+
+.update-icon {
+  color: #ffd166;
+  font-size: 22px;
+}
+
+.update-popover .update-title {
+  color: #163c68;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.update-date {
+  margin-top: 5px;
+  color: #8492a6;
+  font-size: 12px;
+}
+
+.update-list {
+  margin: 10px 0 14px;
+  padding-left: 18px;
+  color: #475569;
+  line-height: 1.7;
+}
 
 .workspace {
   width: 100%;
   max-width: 1120px;
   margin: 0 auto;
   padding: 22px 26px 34px;
+  flex: 1;
 }
 
 .workspace > .el-alert {
@@ -272,6 +298,23 @@ body {
   line-height: 1.6;
 }
 
+.custom-opt-panel {
+  margin: 10px 0 6px 100px;
+  padding: 10px 14px;
+  background: #f8fafc;
+  border-radius: 6px;
+  border: 1px solid #eef2f6;
+}
+
+.custom-opt-panel .setting-row {
+  min-height: 32px;
+  margin-bottom: 6px;
+}
+
+.custom-opt-panel .setting-row:last-child {
+  margin-bottom: 0;
+}
+
 .disabled-panel {
   display: flex;
   align-items: center;
@@ -283,7 +326,7 @@ body {
   background: #f8fafc;
 }
 
-.disabled-panel i {
+.disabled-panel .el-icon {
   margin-right: 8px;
   font-size: 22px;
 }
@@ -323,7 +366,7 @@ body {
 }
 
 .progress-meta strong {
-  color: #2f80ed;
+  color: var(--el-color-primary);
   font-weight: 600;
 }
 
@@ -342,7 +385,7 @@ body {
   color: #3e6289;
 }
 
-.status-line i {
+.status-line .el-icon {
   flex: 0 0 auto;
   margin: 3px 7px 0 0;
 }
@@ -352,70 +395,12 @@ body {
   justify-content: flex-end;
   width: 100%;
   padding-top: 16px;
+  gap: 12px;
 }
 
 .action-row .el-button {
   flex: 0 0 auto;
   min-width: 96px;
-}
-
-@media (max-width: 880px) {
-  .app-header {
-    padding-right: 20px;
-    padding-left: 20px;
-  }
-
-  .workspace {
-    padding-right: 16px;
-    padding-left: 16px;
-  }
-
-  .option-grid {
-    display: block;
-    margin: 0;
-  }
-
-  .option-grid > .section-card {
-    margin-right: 0;
-    margin-left: 0;
-  }
-}
-
-@media (max-width: 660px) {
-  .brand-copy p {
-    display: none;
-  }
-
-  .directory-row {
-    flex-wrap: wrap;
-  }
-
-  .directory-row > label {
-    flex-basis: 100%;
-    margin-bottom: 7px;
-  }
-
-  .directory-row .el-input {
-    flex: 1 1 320px;
-  }
-
-  .directory-option {
-    display: block;
-    margin-left: 0;
-  }
-
-  .directory-option > span {
-    display: block;
-    margin-top: 6px;
-  }
-
-  .execution-options {
-    display: block;
-  }
-
-  .inline-setting {
-    margin: 0 0 12px;
-  }
 }
 
 .mode-switch-wrapper {
@@ -443,10 +428,9 @@ body {
   padding: 10px 24px;
   font-size: 14px;
   font-weight: 500;
-  border-color: #cbd5e1;
 }
 
-.mode-radio-group .el-radio-button__inner i {
+.mode-radio-group .el-radio-button__inner .el-icon {
   margin-right: 6px;
   font-size: 15px;
 }
@@ -456,7 +440,7 @@ body {
   line-height: 1.6;
 }
 
-.pdf-hint i {
+.pdf-hint .el-icon {
   margin-right: 4px;
   font-size: 14px;
 }
@@ -467,7 +451,7 @@ body {
   font-size: 12px;
 }
 
-.pdf-warning-hint i {
+.pdf-warning-hint .el-icon {
   margin-right: 4px;
 }
 
@@ -547,7 +531,7 @@ body {
   line-height: 1.2;
 }
 
-.wireframe-box-inner i {
+.wireframe-box-inner .el-icon {
   font-size: 12px;
   margin-bottom: 2px;
 }
@@ -686,26 +670,6 @@ body {
   text-align: center;
 }
 
-/* 最终任务报告弹窗样式 */
-.result-dialog {
-  max-width: 680px !important;
-  width: 90% !important;
-}
-
-.result-dialog .el-message-box__message {
-  white-space: pre-wrap;
-  font-family: Consolas, Monaco, "Courier New", "Microsoft YaHei", monospace;
-  font-size: 13px;
-  line-height: 1.6;
-  max-height: 65vh;
-  overflow-y: auto;
-  color: #1e293b;
-  background: #f8fafc;
-  padding: 14px 16px;
-  border-radius: 6px;
-  border: 1px solid #e2e8f0;
-}
-
 /* 拖拽提示遮罩层 */
 .drag-drop-overlay {
   position: fixed;
@@ -730,7 +694,7 @@ body {
   box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
 }
 
-.drag-drop-box i {
+.drag-drop-box .el-icon {
   font-size: 52px;
   color: #2f80ed;
   margin-bottom: 12px;
@@ -748,3 +712,72 @@ body {
   color: #64748b;
 }
 
+@media (max-width: 880px) {
+  .app-header {
+    padding-right: 20px;
+    padding-left: 20px;
+  }
+
+  .workspace {
+    padding-right: 16px;
+    padding-left: 16px;
+  }
+
+  .option-grid {
+    display: block;
+    margin: 0;
+  }
+
+  .option-grid > .section-card {
+    margin-right: 0;
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 660px) {
+  .brand-copy p {
+    display: none;
+  }
+
+  .directory-row {
+    flex-wrap: wrap;
+  }
+
+  .directory-row > label {
+    flex-basis: 100%;
+    margin-bottom: 7px;
+  }
+
+  .directory-row .el-input {
+    flex: 1 1 320px;
+  }
+
+  .directory-option {
+    display: block;
+    margin-left: 0;
+  }
+
+  .directory-option > span {
+    display: block;
+    margin-top: 6px;
+  }
+
+  .execution-options {
+    display: block;
+  }
+
+  .inline-setting {
+    margin: 0 0 12px;
+  }
+}
+
+.app-footer {
+  width: 100%;
+  padding: 18px 24px 28px;
+  text-align: center;
+  color: #64748b;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.6px;
+  user-select: none;
+}

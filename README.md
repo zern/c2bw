@@ -6,7 +6,7 @@
 
 `c2bw`（Color to Black & White）是一款高效、专业的批量图像与扫描文档预处理工具，主要用于书籍扫描、文献归档中的图片双页裁切、黑白二值化、无损原图提取以及高清紧凑 PDF 汇总。
 
-当前版本：**v3.5**
+当前版本：**v3.6**
 
 > 📖 **[点击查看：单文件版本详细用户操作使用说明 (简体中文)](使用说明.md) | [點擊查看：單文件版本詳細用戶操作使用說明 (繁體中文)](使用說明.md)**
 
@@ -42,8 +42,12 @@
   - 启动时根据操作系统内核语言环境自动适配；未匹配时默认使用简体中文；
   - 界面右上角提供一键语言切换菜单，支持记忆用户自选偏好；
   - 任务运行实时日志、状态提示与输出目录生成的任务日志报告（`task_report.txt`）均自动适配对应语言。
+- **色彩处理关闭时的文件大小优化体系**：
+  - **原大图片（无优化）**：保留原始文件格式与图像尺寸，未裁切图片完整保留原文件；
+  - **精简尺寸（适合手机）**：在裁切前使用最优算法（Lanczos）将图片等比缩小至 2160px 宽（宽度 ≤2160px 不放大），输出为质量 75 的渐进式（Progressive）JPEG，兼顾高清晰度与极佳的文件压缩率；
+  - **自定义参数**：自由设置图片缩放比例（80%、60%、50%、40%、30%、20%）及渐进式 JPEG 质量（默认 80）。
 - **现代化双界面与高可用容灾**：
-  - 基于 Vue 2 + Element UI 的轻量现代化本地图形界面；
+  - 基于 Vite + Vue 3 + Element Plus 的现代化响应式本地图形界面；
   - 具备多线程并发、实时进度反馈、任务暂停、继续与安全取消机制；
   - **老系统自动降级保护**：Windows 7 下自动匹配 IE11/MSHTML；若缺少 .NET 4.0 或浏览器组件受损，无感自动降级启动原生 Tkinter 桌面窗口；支持命令行 `--tk` 直接进入原生界面。
 
@@ -52,23 +56,23 @@
 ## 二、项目结构
 
 ```text
-c2bw.py                 主程序（图像处理算法、PDF 底层封装、Web 服务与 GUI）
+c2bw.py                 主程序（图像处理核心算法、PDF 底层流封装与服务调度）
+run_c2bw.py             单文件打包启动入口（freeze_support 与主进程防重复保护）
+finalize_build.py       多版本编译产物命名分发与归档脚本
 使用说明.md             单文件版本用户操作使用说明（简体中文）
 使用說明.md             單文件版本用戶操作使用說明（繁體中文）
-webui/                  Vue 2 + Element UI 现代化前端资源
-  index.html            界面结构
-  app.js                Vue 业务逻辑与桥接调用
-  style.css             界面样式
-  vendor/               Vue、Element UI 和字体等离线依赖资源
-c2bw.spec               Windows 10/11 标准打包配置
-c2bw_win7.spec         Windows 7 专用独立版打包配置
-c2bw_macos.spec        macOS (Intel & Apple Silicon) 单文件打包配置
-c2bw_linux.spec        Linux (x64) 单文件打包配置
-build_win7.bat         Windows 7 一键自动化构建脚本
-requirements.txt       标准运行依赖
-requirements-win7.txt  Windows 7 兼容构建依赖
-version_info.txt       Windows 可执行文件版本元数据
-.github/workflows/     GitHub Actions 自动化构建与发布工作流
+frontend/               Vite + Vue 3 + Element Plus 前端项目源码
+webui/                  前端编译产物静态资源（打包时内嵌到可执行程序中）
+c2bw.spec               Windows 10/11 标准版打包配置
+c2bw_win7.spec          Windows 7 专用独立版打包配置
+c2bw_macos.spec         macOS (Intel & Apple Silicon) 单文件打包配置
+c2bw_linux.spec         Linux (x64) 单文件打包配置
+build_win11.bat         Windows 10/11 默认版一键自动化构建脚本
+build_win7.bat          Windows 7 专用独立版一键自动化构建脚本
+requirements.txt        标准运行依赖
+requirements-win7.txt   Windows 7 兼容构建依赖
+version_info.txt        Windows 可执行文件版本元数据
+.github/workflows/      GitHub Actions 自动化构建与发布工作流
   build-and-release.yml 多平台单文件 CI/CD 工作流
 ```
 
@@ -108,21 +112,21 @@ python c2bw.py
 
 ## 四、Windows 编译可执行程序
 
-### 1. Windows 10 / 11 标准版
+### 1. Windows 10 / 11 默认版（推荐）
 
-使用 Python 3.8 环境，执行以下命令即可打包单文件程序：
+直接双击运行自动化构建脚本：
 
 ```bat
-copy "%APPDATA%\Python\Python38\site-packages\pythonnet\runtime\Python.Runtime.dll" .
-python -m PyInstaller --noconfirm --clean c2bw.spec
-del Python.Runtime.dll
+build_win11.bat
 ```
 
-生成产物位于 `dist\`：
-- `dist\智能图像预处理工具 v3.5.exe`
-- `dist\c2bw_v3.5.exe`
+脚本将自动执行前端 Vite 打包、准备运行时依赖、调用 PyInstaller 封装并在 `dist\` 生成以下文件：
+- `dist\智能图像预处理工具 v3.6.exe`
+- `dist\智能图像预处理工具 v3.6_Win11.exe`
+- `dist\c2bw_win11.exe`
+- `dist\c2bw-windows-x64.exe`
 
-### 2. Windows 7 专用独立版
+### 2. Windows 7 专用独立版（兼容老旧系统）
 
 Windows 7 环境建议使用 CPython 3.8.x x64，直接双击运行自动化脚本：
 
@@ -130,18 +134,10 @@ Windows 7 环境建议使用 CPython 3.8.x x64，直接双击运行自动化脚�
 build_win7.bat
 ```
 
-或手动执行打包命令：
-
-```bat
-copy "%APPDATA%\Python\Python38\site-packages\pythonnet\runtime\Python.Runtime.dll" .
-python -m PyInstaller --noconfirm --clean c2bw_win7.spec
-del Python.Runtime.dll
-```
-
 生成产物位于 `dist\`：
-- `dist\智能图像预处理工具 v3.5_Win7.exe`
+- `dist\智能图像预处理工具 v3.6_Win7.exe`
 - `dist\c2bw_win7.exe`
-- `dist\c2bw_v3.5_win7.exe`
+- `dist\c2bw_v3.6_win7.exe`
 
 ---
 
@@ -157,7 +153,7 @@ del Python.Runtime.dll
 - **Linux (x64)**：`c2bw-linux-x64` (适配主流 Linux 发行版，glibc >= 2.35)
 
 > **触发机制**：
-> - **自动发布**：向仓库推送版本标签（如 `git tag v3.5 && git push origin v3.5`）时，自动触发全平台并行编译并直接创建 GitHub Release 附带全部二进制文件及 `SHA256SUMS.txt` 校验清单；
+> - **自动发布**：向仓库推送版本标签（如 `git tag v3.6 && git push origin v3.6`）时，自动触发全平台并行编译并直接创建 GitHub Release 附带全部二进制文件及 `SHA256SUMS.txt` 校验清单；
 > - **手动触发**：亦可在 GitHub 仓库的 `Actions` 页面选择 `Build and Release Multi-Platform Binaries` 手动一键运行测试。
 
 ### 2. 本地手工构建命令

@@ -6,6 +6,8 @@ dist_*/
 __pycache__/
 *.pyc
 Python.Runtime.dll
-.buildozer/
-bin/
+node_modules/
 
+frontend/node_modules/
+*.build/
+*.dist/

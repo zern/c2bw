@@ -4,9 +4,11 @@
 import os
 import clr_loader
 import pythonnet
+import webview
 
 clr_loader_dir = os.path.dirname(clr_loader.__file__)
 pythonnet_dir = os.path.dirname(pythonnet.__file__)
+webview_dir = os.path.dirname(webview.__file__)
 os.environ['PATH'] = os.getcwd() + os.pathsep + os.environ.get('PATH', '')
 
 added_datas = [
@@ -14,10 +16,11 @@ added_datas = [
     ('hanji.ico', '.'),
     (os.path.join(pythonnet_dir, 'runtime'), 'pythonnet/runtime'),
     (os.path.join(clr_loader_dir, 'ffi', 'dlls'), 'clr_loader/ffi/dlls'),
+    (os.path.join(webview_dir, 'lib'), 'webview/lib'),
 ]
 
 a = Analysis(
-    ['c2bw.py'],
+    ['run_c2bw.py'],
     pathex=[],
     binaries=[],
     datas=added_datas,
@@ -32,6 +35,8 @@ a = Analysis(
         'pypdf',
         'webview',
         'webview.platforms.winforms',
+        'webview.platforms.edgechromium',
+        'webview.platforms.mshtml',
         'clr',
         'clr_loader',
         'pythonnet',
@@ -56,7 +61,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='智能图像预处理工具 v3.5',
+    name='c2bw_win11',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

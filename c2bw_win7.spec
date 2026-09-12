@@ -17,7 +17,7 @@ added_datas = [
 ]
 
 a = Analysis(
-    ['c2bw.py'],
+    ['run_c2bw.py'],
     pathex=[],
     binaries=[],
     datas=added_datas,
@@ -56,7 +56,7 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='智能图像预处理工具 v3.5_Win7',
+    name='c2bw_win7',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

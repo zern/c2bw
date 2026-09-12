@@ -206,14 +206,19 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
     return extracted_count, ""
 
 
-def get_task_suffix(enable_crop, enable_binarize):
+def get_task_suffix(enable_crop, enable_binarize, size_opt_mode='original'):
     """根据选择的处理任务生成对应的目录与文件后缀。"""
-    if enable_crop and enable_binarize:
-        return "_已裁切_黑白版"
-    elif enable_crop:
-        return "_已裁切"
-    elif enable_binarize:
-        return "_黑白版"
+    parts = []
+    if enable_crop:
+        parts.append("已裁切")
+    if enable_binarize:
+        parts.append("黑白版")
+    elif size_opt_mode == 'mobile':
+        parts.append("手机优化版")
+    elif size_opt_mode == 'custom':
+        parts.append("已优化")
+    if parts:
+        return "_" + "_".join(parts)
     return ""
 
 
@@ -317,9 +322,12 @@ REPORT_TEXTS = {
         'color_enabled': "- 色彩处理: 已启用 [{detail}]",
         'color_disabled': "- 色彩处理: 未启用 (输出格式: {detail})",
         'bin_otsu': "局部动态自适应二值化 (默认)",
-        'bin_threshold': "全局固定阈值二值化 (阈值: {val})",
         'fmt_keep': "保持原格式与品质",
+        'fmt_original': "原大图片（无优化）",
+        'fmt_mobile': "精简尺寸（宽度≤2160px，JPEG 渐进质量 75）",
+        'fmt_custom': "自定义参数（缩放 {scale}%，JPEG 渐进质量 {quality}）",
         'fmt_jpg80': "转换为 JPG (质量 80)",
+
         'crop_enabled': "- 分页处理: 已启用 [排除单页比例: < {ratio:.2f}，分割比例: {crop_detail}，阅读顺序: {dir_desc}]",
         'crop_disabled': "- 分页处理: 未启用 (不裁切)",
         'crop_r2l': "从右到左 (古籍常用, 右侧为_A)",
@@ -372,7 +380,11 @@ REPORT_TEXTS = {
         'bin_otsu': "局部動態自適應二值化 (預設)",
         'bin_threshold': "全域固定閾值二值化 (閾值: {val})",
         'fmt_keep': "保持原格式與品質",
+        'fmt_original': "原大圖片（無優化）",
+        'fmt_mobile': "精簡尺寸（寬度≤2160px，JPEG 漸進品質 75）",
+        'fmt_custom': "自定義參數（縮放 {scale}%，JPEG 漸進品質 {quality}）",
         'fmt_jpg80': "轉換為 JPG (品質 80)",
+
         'crop_enabled': "- 分頁處理: 已啟用 [排除單頁比例: < {ratio:.2f}，分割比例: {crop_detail}，閱讀順序: {dir_desc}]",
         'crop_disabled': "- 分頁處理: 未啟用 (不裁切)",
         'crop_r2l': "從右到左 (古籍常用, 右側為_A)",
@@ -425,7 +437,11 @@ REPORT_TEXTS = {
         'bin_otsu': "大津の2値化 (デフォルト)",
         'bin_threshold': "固定閾値2値化 (閾値: {val})",
         'fmt_keep': "元の形式と品質を維持",
+        'fmt_original': "原寸大（最適化なし）",
+        'fmt_mobile': "縮小サイズ（幅≤2160px、プログレッシブ JPEG 品質 75）",
+        'fmt_custom': "カスタム設定（縮小率 {scale}%、プログレッシブ JPEG 品質 {quality}）",
         'fmt_jpg80': "JPGに変換 (品質 80)",
+
         'crop_enabled': "- ページ分割処理: 有効 [単一ページ除外比率: < {ratio:.2f}，分割比率: {crop_detail}，読書順序: {dir_desc}]",
         'crop_disabled': "- ページ分割処理: 無効 (裁断なし)",
         'crop_r2l': "右から左へ (和綴じ/縦書き, 右側が_A)",
@@ -478,7 +494,11 @@ REPORT_TEXTS = {
         'bin_otsu': "OTSU Adaptive (Default)",
         'bin_threshold': "Fixed Threshold (Threshold: {val})",
         'fmt_keep': "Keep Original Format & Quality",
+        'fmt_original': "Original Size (No Optimization)",
+        'fmt_mobile': "Compact Size (Width ≤ 2160px, Progressive JPEG Q75)",
+        'fmt_custom': "Custom Parameters (Scale {scale}%, Progressive JPEG Q{quality})",
         'fmt_jpg80': "Convert to JPG (Quality 80)",
+
         'crop_enabled': "- Page Split/Crop: Enabled [Single-page ratio: < {ratio:.2f}, Split ratio: {crop_detail}, Reading order: {dir_desc}]",
         'crop_disabled': "- Page Split/Crop: Disabled (No crop)",
         'crop_r2l': "Right-to-Left (Ancient books, Right side is _A)",
@@ -736,16 +756,45 @@ def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options
             if gray_img is not None:
                 gray_img.close()
 
-    if settings.get('non_bin_format') == "jpg80":
-        # 转换为JPG，质量80。JPEG不支持透明通道/调色板，需先转RGB。
-        rgb_img = pil_img.convert('RGB') if pil_img.mode in ('RGBA', 'P', 'LA') else pil_img
+    size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
+    if size_opt_mode in ('mobile', 'custom', 'jpg80'):
+        # 转换为 JPEG 渐进式格式
+        if size_opt_mode == 'mobile':
+            quality = 75
+            progressive = True
+        elif size_opt_mode == 'custom':
+            quality = int(settings.get('custom_quality', 80))
+            progressive = True
+        else:  # jpg80
+            quality = 80
+            progressive = False
+
+        if pil_img.mode in ('RGBA', 'LA'):
+            bg = Image.new('RGB', pil_img.size, (255, 255, 255))
+            bg.paste(pil_img, mask=pil_img.split()[-1])
+            rgb_img = bg
+        elif pil_img.mode != 'RGB':
+            rgb_img = pil_img.convert('RGB')
+        else:
+            rgb_img = pil_img
+
         try:
             output_path = f"{out_path_base}.jpg"
-            save_image_atomically(rgb_img, output_path, 'JPEG', write_lock=write_lock, quality=80, dpi=norm_dpi)
+            save_image_atomically(
+                rgb_img,
+                output_path,
+                'JPEG',
+                write_lock=write_lock,
+                quality=quality,
+                progressive=progressive,
+                optimize=True,
+                dpi=norm_dpi,
+            )
             return output_path
         finally:
             if rgb_img is not pil_img:
                 rgb_img.close()
+
 
     # 保持原始图片格式。
     output_path = f"{out_path_base}{original_ext}"
@@ -838,10 +887,39 @@ def process_single_image(src_path, rel_path, filename, output_stem, settings,
         base_name = output_stem
         jpeg_save_options = get_jpeg_save_options(img)
 
+        # 检查是否需在裁切前进行文件大小优化与尺寸重采样
+        size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
+        if not settings.get('enable_binarize'):
+            resample_filter = getattr(Image, 'Resampling', Image).LANCZOS
+            if size_opt_mode == 'mobile':
+                if w > 2160:
+                    img.load()
+                    target_w = 2160
+                    target_h = max(1, int(round(h * 2160.0 / w)))
+                    resized = img.resize((target_w, target_h), resample_filter)
+                    resized.info['dpi'] = norm_dpi
+                    img.close()
+                    img = resized
+                    w, h = img.size
+                    aspect_ratio = w / h
+            elif size_opt_mode == 'custom':
+                custom_scale = int(settings.get('custom_scale', 80))
+                scale = custom_scale / 100.0
+                if scale != 1.0:
+                    img.load()
+                    target_w = max(1, int(round(w * scale)))
+                    target_h = max(1, int(round(h * scale)))
+                    resized = img.resize((target_w, target_h), resample_filter)
+                    resized.info['dpi'] = norm_dpi
+                    img.close()
+                    img = resized
+                    w, h = img.size
+                    aspect_ratio = w / h
+
         is_excluded = settings.get('enable_crop') and (aspect_ratio < settings.get('exclude_ratio', 0.7))
         if not settings.get('enable_crop') or aspect_ratio < settings.get('exclude_ratio', 0.7):
-            # 未二值化、保持格式且未实际裁切时，直接复制源文件以完整保留 JPEG 品质与元数据。
-            if not settings.get('enable_binarize') and settings.get('non_bin_format') == 'keep':
+            # 未二值化、保持原大且未实际裁切时，直接复制源文件以完整保留 JPEG 品质与元数据。
+            if not settings.get('enable_binarize') and size_opt_mode in ('original', 'keep'):
                 output_path = os.path.join(out_dir, f"{base_name}{original_ext}")
                 copy_file_atomically(src_path, output_path, write_lock=write_lock)
                 output_paths.append(output_path)
@@ -860,6 +938,7 @@ def process_single_image(src_path, rel_path, filename, output_stem, settings,
                 is_excluded_single=is_excluded,
                 output_count=len(output_paths),
             )
+
 
         # 一次只保留一个裁切页，降低大图在多线程下的峰值内存。
         img.load()
@@ -996,8 +1075,20 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
         m = t['bin_otsu'] if str(settings.get('bin_method')) == "0" else t['bin_threshold'].format(val=settings.get('threshold_val', 50))
         lines.append(t['color_enabled'].format(detail=m))
     else:
-        fmt = t['fmt_keep'] if settings.get('non_bin_format') == 'keep' else t['fmt_jpg80']
+        size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
+        if size_opt_mode in ('original', 'keep'):
+            fmt = t.get('fmt_original', t.get('fmt_keep', '原大图片（无优化）'))
+        elif size_opt_mode == 'mobile':
+            fmt = t.get('fmt_mobile', '精简尺寸（适合手机）')
+        elif size_opt_mode == 'custom':
+            fmt = t.get('fmt_custom', '自定义参数（缩放 {scale}%，JPEG 质量 {quality}）').format(
+                scale=settings.get('custom_scale', 80),
+                quality=settings.get('custom_quality', 80),
+            )
+        else:
+            fmt = t.get('fmt_original', t.get('fmt_keep', '原大图片（无优化）'))
         lines.append(t['color_disabled'].format(detail=fmt))
+
 
     # 分页裁切参数
     if settings.get('enable_crop'):

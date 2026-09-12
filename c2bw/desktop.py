@@ -20,6 +20,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import tkinter.font as tkfont
 
+
+
 from c2bw.core import (
     PDF_APPLICATION_NAME,
     PDF_SPEC_VERSION,
@@ -308,7 +310,11 @@ def _get_free_port():
 def launch_web_ui():
     service = ImageProcessorService()
     bridge = WebImageProcessorBridge(service)
-    index_path = _resource_path('webui', 'index.html')
+    dev_mode = '--dev' in sys.argv
+    if dev_mode:
+        target_url = 'http://localhost:5173/'
+    else:
+        target_url = _resource_path('webui', 'index.html')
     sys_lang = get_system_language()
     saved_lang = get_saved_language()
     current_lang = saved_lang if saved_lang else sys_lang
@@ -319,7 +325,7 @@ def launch_web_ui():
 
     window = webview.create_window(
         app_title,
-        url=index_path,
+        url=target_url,
         js_api=bridge,
         width=1040,
         height=760,
@@ -388,7 +394,7 @@ class ImageProcessorApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("智能图像预处理工具 v3.5")
+        self.root.title("智能图像预处理工具 v3.6")
         # 在较矮的屏幕上留出系统任务栏空间，其他内容通过滚动条访问。
         window_height = min(820, max(480, self.root.winfo_screenheight() - 100))
         self.root.geometry(f"700x{window_height}")
@@ -419,7 +425,10 @@ class ImageProcessorApp:
         self.bin_method = tk.StringVar(value="0") 
         self.threshold_val = tk.IntVar(value=50)  
 
-        # 新增：取消二值化后的输出格式选项 ("keep"=保持原格式, "jpg80"=转换为JPG质量80)
+        # 取消二值化时的文件大小优化选项
+        self.size_opt_mode = tk.StringVar(value="original")
+        self.custom_scale = tk.IntVar(value=80)
+        self.custom_quality = tk.IntVar(value=80)
         self.non_bin_format = tk.StringVar(value="keep")
         
         self.enable_crop = tk.BooleanVar(value=True) 
@@ -564,19 +573,50 @@ class ImageProcessorApp:
         self.thresh_entry = ttk.Entry(radio_frame, textvariable=self.threshold_val, width=6)
         self.thresh_entry.pack(side=tk.LEFT, padx=5)
 
-        # 新增：取消二值化时可选的输出格式
+        # 新增：取消二值化时的文件大小优化选择
         self.non_bin_options_frame = ttk.Frame(bin_frame)
         self.non_bin_options_frame.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(10, 0))
 
-        ttk.Label(self.non_bin_options_frame, text="不二值化时的输出格式:").grid(row=0, column=0, sticky=tk.W, pady=5)
+        ttk.Label(self.non_bin_options_frame, text="文件大小优化:").grid(row=0, column=0, sticky=tk.W, pady=5)
         non_bin_radio_frame = ttk.Frame(self.non_bin_options_frame)
         non_bin_radio_frame.grid(row=0, column=1, sticky=tk.W, pady=5)
 
-        self.rb_keep_format = ttk.Radiobutton(non_bin_radio_frame, text="保持原始图片格式", variable=self.non_bin_format, value="keep")
-        self.rb_keep_format.pack(side=tk.LEFT, padx=10)
+        self.rb_size_original = ttk.Radiobutton(
+            non_bin_radio_frame, text="原大图片（无优化）",
+            variable=self.size_opt_mode, value="original", command=self.toggle_size_opt_options
+        )
+        self.rb_size_original.pack(side=tk.LEFT, padx=6)
 
-        self.rb_jpg80 = ttk.Radiobutton(non_bin_radio_frame, text="转换为JPG (质量80)", variable=self.non_bin_format, value="jpg80")
-        self.rb_jpg80.pack(side=tk.LEFT, padx=10)
+        self.rb_size_mobile = ttk.Radiobutton(
+            non_bin_radio_frame, text="精简尺寸（适合手机）",
+            variable=self.size_opt_mode, value="mobile", command=self.toggle_size_opt_options
+        )
+        self.rb_size_mobile.pack(side=tk.LEFT, padx=6)
+
+        self.rb_size_custom = ttk.Radiobutton(
+            non_bin_radio_frame, text="自定义参数",
+            variable=self.size_opt_mode, value="custom", command=self.toggle_size_opt_options
+        )
+        self.rb_size_custom.pack(side=tk.LEFT, padx=6)
+
+        # 自定义参数子项（尺寸比例下拉、质量输入框）
+        self.custom_opt_subframe = ttk.Frame(self.non_bin_options_frame)
+        self.custom_opt_subframe.grid(row=1, column=1, sticky=tk.W, pady=(4, 0))
+
+        ttk.Label(self.custom_opt_subframe, text="图片尺寸:").pack(side=tk.LEFT, padx=(0, 4))
+        self.scale_combo = ttk.Combobox(
+            self.custom_opt_subframe,
+            values=["80%", "60%", "50%", "40%", "30%", "20%"],
+            state="readonly",
+            width=7,
+        )
+        self.scale_combo.set("80%")
+        self.scale_combo.pack(side=tk.LEFT, padx=(0, 12))
+        self.scale_combo.bind("<<ComboboxSelected>>", self._on_scale_selected)
+
+        ttk.Label(self.custom_opt_subframe, text="JPEG质量:").pack(side=tk.LEFT, padx=(0, 4))
+        self.quality_entry = ttk.Entry(self.custom_opt_subframe, textvariable=self.custom_quality, width=5)
+        self.quality_entry.pack(side=tk.LEFT)
 
         # --- 3. 裁切参数区域 ---
         crop_frame = ttk.LabelFrame(main_frame, text="分页处理", padding="15")
@@ -657,6 +697,16 @@ class ImageProcessorApp:
         )
         self.status_label.grid(row=7, column=0, sticky=tk.EW)
         
+        footer_label = ttk.Label(
+            main_frame,
+            text="By weiceng © 漢籍合璧",
+            font=('Microsoft YaHei', 9),
+            foreground="#6b7280",
+            anchor=tk.CENTER,
+            justify=tk.CENTER,
+        )
+        footer_label.grid(row=8, column=0, sticky=tk.EW, pady=(12, 6))
+        
         self.toggle_bin_options()
         self.toggle_crop_options()
 
@@ -727,12 +777,12 @@ class ImageProcessorApp:
             return
         pdf_dir = os.path.dirname(os.path.abspath(path))
         pdf_name = os.path.splitext(os.path.basename(path))[0]
-        suffix = get_task_suffix(self.enable_crop.get(), self.enable_binarize.get())
+        suffix = get_task_suffix(self.enable_crop.get(), self.enable_binarize.get(), size_opt_mode=self.size_opt_mode.get())
         if not suffix:
             if self.pdf_no_convert.get():
                 self.pdf_target_preview.set(os.path.join(pdf_dir, pdf_name))
             else:
-                self.pdf_target_preview.set("（请至少勾选一种任务：裁切或黑白二值化）")
+                self.pdf_target_preview.set("（请至少勾选一种任务：裁切、黑白或大小优化）")
         else:
             self.pdf_target_preview.set(os.path.join(pdf_dir, f"{pdf_name}{suffix}"))
 
@@ -853,6 +903,26 @@ class ImageProcessorApp:
                 self.target_dir.set(os.path.join(parent_dir, "output"))
                 self.status_label.config(text=f"已通过拖拽载入图片所在目录: {os.path.basename(parent_dir)}")
 
+    def _on_scale_selected(self, event=None):
+        val_str = self.scale_combo.get().replace('%', '').strip()
+        try:
+            self.custom_scale.set(int(val_str))
+        except (ValueError, tk.TclError):
+            self.custom_scale.set(80)
+
+    def toggle_size_opt_options(self):
+        if not self.enable_binarize.get() and self.size_opt_mode.get() == "custom":
+            self.scale_combo.config(state="readonly")
+            self.quality_entry.config(state=tk.NORMAL)
+        else:
+            self.scale_combo.config(state=tk.DISABLED)
+            self.quality_entry.config(state=tk.DISABLED)
+        if self.size_opt_mode.get() == "original":
+            self.non_bin_format.set("keep")
+        else:
+            self.non_bin_format.set("jpg80")
+        self._update_pdf_hint()
+
     def toggle_bin_options(self):
         state = tk.NORMAL if self.enable_binarize.get() else tk.DISABLED
         self.rb_otsu.config(state=state)
@@ -862,10 +932,12 @@ class ImageProcessorApp:
         else:
             self.toggle_threshold()
 
-        # 取消二值化时才可选择输出格式，二者状态互斥
+        # 取消二值化时才可选择大小优化，二者状态互斥
         non_bin_state = tk.DISABLED if self.enable_binarize.get() else tk.NORMAL
-        self.rb_keep_format.config(state=non_bin_state)
-        self.rb_jpg80.config(state=non_bin_state)
+        self.rb_size_original.config(state=non_bin_state)
+        self.rb_size_mobile.config(state=non_bin_state)
+        self.rb_size_custom.config(state=non_bin_state)
+        self.toggle_size_opt_options()
         self._update_pdf_hint()
 
     def toggle_threshold(self):
@@ -1084,7 +1156,10 @@ class ImageProcessorApp:
                 'enable_binarize': self.enable_binarize.get(),
                 'bin_method': self.bin_method.get(),
                 'threshold_val': self.threshold_val.get(),
-                'non_bin_format': self.non_bin_format.get(),
+                'size_opt_mode': self.size_opt_mode.get(),
+                'custom_scale': self.custom_scale.get(),
+                'custom_quality': self.custom_quality.get(),
+                'non_bin_format': 'keep' if self.size_opt_mode.get() == 'original' else 'jpg80',
                 'enable_crop': self.enable_crop.get(),
                 'crop_percent': self.crop_percent.get(),
                 'crop_direction': self.crop_direction.get(),
@@ -1118,8 +1193,15 @@ class ImageProcessorApp:
             messagebox.showwarning("线程数无效", "最大线程数必须在 1 到 64 之间。")
             return None
         if not settings['enable_binarize'] and not settings['enable_crop']:
-            if settings['non_bin_format'] == 'keep' and not settings['enable_pdf']:
-                messagebox.showwarning("操作无效", "请至少启用一种处理任务（色彩处理或分页裁切），或选择转为 JPG，或勾选合并输出为 PDF！")
+            if settings['size_opt_mode'] == 'original' and not settings['enable_pdf']:
+                messagebox.showwarning("操作无效", "请至少启用一种处理任务（色彩处理、分页裁切或文件大小优化），或勾选合并输出为 PDF！")
+                return None
+        if settings['size_opt_mode'] == 'custom':
+            if not 1 <= settings['custom_scale'] <= 100:
+                messagebox.showwarning("缩放比例无效", "自定义缩放比例必须在 1 到 100 之间。")
+                return None
+            if not 1 <= settings['custom_quality'] <= 100:
+                messagebox.showwarning("质量参数无效", "自定义 JPEG 质量必须在 1 到 100 之间。")
                 return None
         if settings['enable_binarize'] and not 0 <= settings['threshold_val'] <= 100:
             messagebox.showwarning("阈值无效", "自定义阈值必须在 0 到 100 之间。")
@@ -1156,14 +1238,15 @@ class ImageProcessorApp:
             enable_binarize = self.enable_binarize.get()
             no_convert_pdf = self.pdf_no_convert.get()
 
-            if not enable_crop and not enable_binarize:
+            size_opt_mode = self.size_opt_mode.get()
+            if not enable_crop and not enable_binarize and size_opt_mode == 'original':
                 if not no_convert_pdf:
-                    messagebox.showwarning("操作无效", "请至少勾选一种处理任务（裁切或黑白二值化）！")
+                    messagebox.showwarning("操作无效", "请至少勾选一种处理任务（裁切、黑白二值化或文件大小优化）！")
                     return
                 task_dir = os.path.join(pdf_dir, pdf_name)
                 final_pdf_path = ''
             else:
-                suffix = get_task_suffix(enable_crop, enable_binarize)
+                suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
                 task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
                 final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
 
@@ -1211,7 +1294,10 @@ class ImageProcessorApp:
                 'enable_binarize': enable_binarize,
                 'bin_method': self.bin_method.get(),
                 'threshold_val': thresh,
-                'non_bin_format': self.non_bin_format.get(),
+                'size_opt_mode': size_opt_mode,
+                'custom_scale': self.custom_scale.get(),
+                'custom_quality': self.custom_quality.get(),
+                'non_bin_format': 'keep' if size_opt_mode == 'original' else 'jpg80',
                 'enable_crop': enable_crop,
                 'crop_percent': c_pct,
                 'crop_direction': self.crop_direction.get(),
@@ -1408,7 +1494,7 @@ def main():
     if sys.platform == 'win32':
         try:
             import ctypes
-            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('c2bw.imageprocessor.gui.v35')
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID('c2bw.imageprocessor.gui.v36')
         except Exception:
             pass
 

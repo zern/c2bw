@@ -47,10 +47,10 @@ from c2bw.core import (
 
 
 APP_TITLES = {
-    'zh-CN': '智能图像预处理工具 v3.5',
-    'zh-TW': '智能圖像預處理工具 v3.5',
-    'ja': 'スマート画像前処理ツール v3.5',
-    'en': 'Smart Image Preprocessor v3.5',
+    'zh-CN': '智能图像预处理工具 v3.6',
+    'zh-TW': '智能圖像預處理工具 v3.6',
+    'ja': 'スマート画像前処理ツール v3.6',
+    'en': 'Smart Image Preprocessor v3.6',
 }
 
 QUIT_CONFIRMATIONS = {
@@ -66,6 +66,7 @@ UPDATE_INFO_URL = 'https://tools.hanjihebi.com/aisoft/c2bw_update.json'
 def get_config_dir():
     """获取用户配置存储目录，优先使用 %APPDATA%/c2bw 或 ~/.c2bw"""
     app_data = os.environ.get('APPDATA')
+
     if app_data:
         config_dir = os.path.join(app_data, 'c2bw')
     else:
@@ -131,7 +132,7 @@ def save_user_language(lang):
 
 
 class ImageProcessorService:
-    """供 Web UI / Pywebview 及 Android API 调用的线程安全核心业务服务。"""
+    """供 Web UI / Pywebview 及 RPC 调用的线程安全核心业务服务。"""
 
     UPDATE_INFO_URL = UPDATE_INFO_URL
     PDF_APPLICATION_NAME = PDF_APPLICATION_NAME
@@ -161,15 +162,15 @@ class ImageProcessorService:
         try:
             request = urllib.request.Request(
                 self.UPDATE_INFO_URL,
-                headers={'User-Agent': 'SHUGE-C2BW/3.5'},
+                headers={'User-Agent': 'SHUGE-C2BW/3.6'},
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 data = json.loads(response.read().decode('utf-8-sig'))
             if not isinstance(data, dict) or not data.get('version'):
                 raise ValueError('服务器返回的更新信息格式无效。')
-            return {'ok': True, 'current_version': '3.5.0.0', 'update': data, 'source': 'server'}
+            return {'ok': True, 'current_version': '3.6.0.0', 'update': data, 'source': 'server'}
         except Exception:
-            return {'ok': False, 'current_version': '3.5.0.0'}
+            return {'ok': False, 'current_version': '3.6.0.0'}
 
     def open_download_url(self, url):
         try:
@@ -187,6 +188,22 @@ class ImageProcessorService:
             raw_settings = raw_settings or {}
             source_text = str(raw_settings.get('source_dir', '')).strip()
             target_text = str(raw_settings.get('target_dir', '')).strip()
+
+            size_opt_mode = str(raw_settings.get('size_opt_mode', '')).strip()
+            if not size_opt_mode:
+                non_bin_format = str(raw_settings.get('non_bin_format', 'keep')).strip()
+                if non_bin_format == 'jpg80':
+                    size_opt_mode = 'custom'
+                else:
+                    size_opt_mode = 'original'
+            elif size_opt_mode == 'keep':
+                size_opt_mode = 'original'
+            elif size_opt_mode == 'jpg80':
+                size_opt_mode = 'custom'
+
+            custom_scale = int(raw_settings.get('custom_scale', 80))
+            custom_quality = int(raw_settings.get('custom_quality', 80))
+
             settings = {
                 'work_mode': 'dir',
                 'source_dir': os.path.abspath(source_text) if source_text else '',
@@ -196,7 +213,10 @@ class ImageProcessorService:
                 'enable_binarize': bool(raw_settings.get('enable_binarize', True)),
                 'bin_method': str(raw_settings.get('bin_method', '0')),
                 'threshold_val': int(raw_settings.get('threshold_val', 50)),
-                'non_bin_format': str(raw_settings.get('non_bin_format', 'keep')),
+                'size_opt_mode': size_opt_mode,
+                'custom_scale': custom_scale,
+                'custom_quality': custom_quality,
+                'non_bin_format': 'keep' if size_opt_mode == 'original' else 'jpg80',
                 'enable_crop': bool(raw_settings.get('enable_crop', True)),
                 'crop_percent': int(raw_settings.get('crop_percent', 50)),
                 'crop_direction': str(raw_settings.get('crop_direction', 'R2L')),
@@ -221,12 +241,17 @@ class ImageProcessorService:
         if os.path.isdir(settings['target_dir']) and os.listdir(settings['target_dir']):
             return None, '为避免覆盖已有文件，请选择一个不存在或空的输出目录。'
         if not settings['enable_binarize'] and not settings['enable_crop']:
-            if settings['non_bin_format'] == 'keep' and not settings['enable_pdf']:
-                return None, '请至少启用一种处理任务（色彩处理或分页裁切），或选择转为 JPG，或勾选合并输出为 PDF。'
+            if settings['size_opt_mode'] == 'original' and not settings['enable_pdf']:
+                return None, '请至少启用一种处理任务（色彩处理、分页裁切或文件大小优化），或勾选合并输出为 PDF。'
         if settings['bin_method'] not in ('0', '1'):
             return None, '二值化方式无效。'
-        if settings['non_bin_format'] not in ('keep', 'jpg80'):
-            return None, '非二值化输出格式无效。'
+        if settings['size_opt_mode'] not in ('original', 'mobile', 'custom'):
+            return None, '文件大小优化选项无效。'
+        if settings['size_opt_mode'] == 'custom':
+            if not (1 <= settings['custom_scale'] <= 100):
+                return None, '自定义缩放比例必须在 1 到 100 之间。'
+            if not (1 <= settings['custom_quality'] <= 100):
+                return None, '自定义 JPEG 质量必须在 1 到 100 之间。'
         if settings['crop_direction'] not in ('R2L', 'L2R'):
             return None, '阅读顺序无效。'
         if not 1 <= settings['max_threads'] <= 64:
@@ -253,17 +278,32 @@ class ImageProcessorService:
             enable_binarize = bool(raw_settings.get('enable_binarize', True))
             no_convert_pdf = bool(raw_settings.get('no_convert_pdf', False))
 
+            size_opt_mode = str(raw_settings.get('size_opt_mode', '')).strip()
+            if not size_opt_mode:
+                non_bin_format = str(raw_settings.get('non_bin_format', 'keep')).strip()
+                if non_bin_format == 'jpg80':
+                    size_opt_mode = 'custom'
+                else:
+                    size_opt_mode = 'original'
+            elif size_opt_mode == 'keep':
+                size_opt_mode = 'original'
+            elif size_opt_mode == 'jpg80':
+                size_opt_mode = 'custom'
+
+            custom_scale = int(raw_settings.get('custom_scale', 80))
+            custom_quality = int(raw_settings.get('custom_quality', 80))
+
             if not enable_crop and not enable_binarize:
-                if not no_convert_pdf:
-                    return None, '请至少启用一种处理任务（裁切或黑白二值化）。'
+                if not no_convert_pdf and size_opt_mode == 'original':
+                    return None, '请至少启用一种处理任务（裁切、黑白二值化或文件大小优化）。'
 
             pdf_dir = os.path.dirname(pdf_path)
             pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
-            if not enable_crop and not enable_binarize and no_convert_pdf:
+            if not enable_crop and not enable_binarize and no_convert_pdf and size_opt_mode == 'original':
                 task_dir = os.path.join(pdf_dir, pdf_name)
                 final_pdf_path = ''
             else:
-                suffix = get_task_suffix(enable_crop, enable_binarize)
+                suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
                 task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
                 final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
 
@@ -279,7 +319,10 @@ class ImageProcessorService:
                 'enable_binarize': enable_binarize,
                 'bin_method': str(raw_settings.get('bin_method', '0')),
                 'threshold_val': int(raw_settings.get('threshold_val', 50)),
-                'non_bin_format': str(raw_settings.get('non_bin_format', 'keep')),
+                'size_opt_mode': size_opt_mode,
+                'custom_scale': custom_scale,
+                'custom_quality': custom_quality,
+                'non_bin_format': 'keep' if size_opt_mode == 'original' else 'jpg80',
                 'enable_crop': enable_crop,
                 'crop_percent': int(raw_settings.get('crop_percent', 50)),
                 'crop_direction': str(raw_settings.get('crop_direction', 'R2L')),
@@ -293,8 +336,13 @@ class ImageProcessorService:
 
         if settings['bin_method'] not in ('0', '1'):
             return None, '二值化方式无效。'
-        if settings['non_bin_format'] not in ('keep', 'jpg80'):
-            return None, '非二值化输出格式无效。'
+        if settings['size_opt_mode'] not in ('original', 'mobile', 'custom'):
+            return None, '文件大小优化选项无效。'
+        if settings['size_opt_mode'] == 'custom':
+            if not (1 <= settings['custom_scale'] <= 100):
+                return None, '自定义缩放比例必须在 1 到 100 之间。'
+            if not (1 <= settings['custom_quality'] <= 100):
+                return None, '自定义 JPEG 质量必须在 1 到 100 之间。'
         if settings['crop_direction'] not in ('R2L', 'L2R'):
             return None, '阅读顺序无效。'
         if not 1 <= settings['max_threads'] <= 64:
@@ -876,10 +924,13 @@ class ImageProcessorService:
             self.ui_events.put(('finish', f"任务异常终止：{str(e)}"))
 
     def _run_task(self, settings):
+        size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
+        if size_opt_mode == 'keep':
+            size_opt_mode = 'original'
         if (
             not settings.get('enable_binarize')
             and not settings.get('enable_crop')
-            and settings.get('non_bin_format') == 'keep'
+            and size_opt_mode == 'original'
             and settings.get('enable_pdf')
         ):
             self._run_direct_image_to_pdf_task(settings)
@@ -1007,7 +1058,15 @@ class ImageProcessorService:
             self.ui_events.put(('finish', get_backend_text('err_pdf_extract', lang, error=err)))
             return
 
-        if not settings.get('enable_crop', False) and not settings.get('enable_binarize', False) and (settings.get('no_convert_pdf', False) or not settings.get('enable_pdf', True)):
+        size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
+        if size_opt_mode == 'keep':
+            size_opt_mode = 'original'
+        if (
+            not settings.get('enable_crop', False)
+            and not settings.get('enable_binarize', False)
+            and size_opt_mode == 'original'
+            and (settings.get('no_convert_pdf', False) or not settings.get('enable_pdf', True))
+        ):
             summary = {
                 'settings': settings,
                 'total_input': extracted_count,
