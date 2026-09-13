@@ -9,6 +9,7 @@ from c2bw.core import (
     calculate_otsu_threshold,
     process_single_image,
     save_image,
+    get_jp2_save_options,
     build_single_pdf,
     extract_images_from_pdf,
 )
@@ -21,6 +22,7 @@ __all__ = [
     "calculate_otsu_threshold",
     "process_single_image",
     "save_image",
+    "get_jp2_save_options",
     "build_single_pdf",
     "extract_images_from_pdf",
     "ImageProcessorService",

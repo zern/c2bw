@@ -705,6 +705,26 @@ def get_jpeg_save_options(source_img):
     return options
 
 
+def get_jp2_save_options(source_img, src_path):
+    """计算并保留源 JP2 的压缩比率，避免裁切后默认使用无损(Lossless)模式导致文件体积暴增十余倍。"""
+    try:
+        file_size = os.path.getsize(src_path)
+        if file_size <= 0:
+            return {}
+        channels = len(source_img.getbands()) if hasattr(source_img, 'getbands') else 3
+        raw_bytes = source_img.width * source_img.height * channels
+        compression_rate = raw_bytes / float(file_size)
+        if compression_rate < 2.5:
+            return {'irreversible': False}
+        return {
+            'quality_mode': 'rates',
+            'quality_layers': [round(compression_rate, 2)],
+            'irreversible': True,
+        }
+    except Exception:
+        return {}
+
+
 def save_image_atomically(pil_img, output_path, image_format, write_lock=None, **save_options):
     """写入同目录临时文件，成功后再替换，避免异常时出现残缺图片。"""
     temporary_path = f"{output_path}.{threading.get_ident()}.part"
@@ -747,7 +767,7 @@ def copy_file_atomically(source_path, output_path, write_lock=None):
         _do_copy()
 
 
-def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options=None, write_lock=None):
+def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options=None, jp2_save_options=None, write_lock=None):
     """保存一张处理结果，并返回最终输出路径。"""
     norm_dpi = get_normalized_dpi(pil_img, default_res=300.0)
 
@@ -828,6 +848,9 @@ def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options
         '.jpg': 'JPEG', '.jpeg': 'JPEG',
         '.png': 'PNG', '.tif': 'TIFF', '.tiff': 'TIFF',
         '.bmp': 'BMP', '.jp2': 'JPEG2000',
+        '.j2k': 'JPEG2000', '.jpc': 'JPEG2000',
+        '.jpf': 'JPEG2000', '.jpx': 'JPEG2000',
+        '.j2c': 'JPEG2000',
     }
     if original_ext in ('.jpg', '.jpeg'):
         options = dict(jpeg_save_options or {})
@@ -845,6 +868,9 @@ def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options
         save_opts = {}
         if image_format in ('PNG', 'TIFF', 'BMP'):
             save_opts['dpi'] = norm_dpi
+        elif image_format == 'JPEG2000':
+            if jp2_save_options:
+                save_opts.update(jp2_save_options)
         try:
             save_image_atomically(pil_img, output_path, image_format, write_lock=write_lock, **save_opts)
         except OSError:
@@ -905,13 +931,14 @@ def process_single_image(src_path, rel_path, filename, output_stem, settings,
             return make_result(False, f"跳过: 图片高度为0 {filename}", "图片高度为 0", is_single=False, is_excluded_single=False, output_count=0)
             
         aspect_ratio = w / h
-        if original_ext not in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2']:
+        if original_ext not in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c']:
             return make_result(False, f"跳过: 非支持的扩展名 {filename}", "不支持的扩展名", is_single=False, is_excluded_single=False, output_count=0)
 
         out_dir = os.path.join(settings['target_dir'], os.path.dirname(rel_path))
         os.makedirs(out_dir, exist_ok=True)
         base_name = output_stem
         jpeg_save_options = get_jpeg_save_options(img)
+        jp2_save_options = get_jp2_save_options(img, src_path) if original_ext in ('.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c') else None
 
         # 检查是否需在裁切前进行文件大小优化与尺寸重采样
         size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
@@ -954,7 +981,10 @@ def process_single_image(src_path, rel_path, filename, output_stem, settings,
                 img.load()
                 path_base = os.path.join(out_dir, base_name)
                 output_paths.append(save_image(
-                    img, path_base, original_ext, settings, jpeg_save_options, write_lock=write_lock
+                    img, path_base, original_ext, settings,
+                    jpeg_save_options=jpeg_save_options,
+                    jp2_save_options=jp2_save_options,
+                    write_lock=write_lock,
                 ))
             tag = "排除单页" if is_excluded else "单页"
             return make_result(
@@ -991,7 +1021,8 @@ def process_single_image(src_path, rel_path, filename, output_stem, settings,
                     os.path.join(out_dir, crop_base_name),
                     original_ext,
                     settings,
-                    jpeg_save_options,
+                    jpeg_save_options=jpeg_save_options,
+                    jp2_save_options=jp2_save_options,
                     write_lock=write_lock,
                 ))
             finally:
@@ -1465,6 +1496,7 @@ _calculate_otsu_threshold = calculate_otsu_threshold
 _parse_jp2_dpi = parse_jp2_dpi
 _get_normalized_dpi = get_normalized_dpi
 _get_jpeg_save_options = get_jpeg_save_options
+_get_jp2_save_options = get_jp2_save_options
 _save_image_atomically = save_image_atomically
 _copy_file_atomically = copy_file_atomically
 _remove_outputs = remove_outputs
@@ -1492,6 +1524,7 @@ __all__ = [
     'parse_jp2_dpi',
     'get_normalized_dpi',
     'get_jpeg_save_options',
+    'get_jp2_save_options',
     'save_image_atomically',
     'copy_file_atomically',
     'save_image',
