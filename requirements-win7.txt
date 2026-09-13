@@ -1,5 +1,4 @@
 # Windows 7 SP1 x64 build environment; use CPython 3.8.10 x64.
-numpy==1.24.4
 Pillow==9.5.0
 pypdf==3.17.4
 pyinstaller==4.10

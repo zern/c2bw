@@ -12,7 +12,6 @@ import struct
 import tempfile
 import threading
 import locale
-import numpy as np
 from PIL import Image, JpegImagePlugin, PdfImagePlugin, Jpeg2KImagePlugin
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
@@ -589,28 +588,55 @@ def get_system_language():
 
 
 
-def calculate_otsu_threshold(img_array):
-    """自适应 OTSU 阈值计算。"""
-    counts, _ = np.histogram(img_array, bins=256, range=(0, 256))
-    if counts.sum() == 0:
+def calculate_otsu_threshold(img_or_counts):
+    """自适应 OTSU 阈值计算。支持传入 PIL Image(灰度图)、直方图计数列表或兼容数组。"""
+    if hasattr(img_or_counts, 'histogram'):
+        counts = img_or_counts.histogram()
+    elif isinstance(img_or_counts, (list, tuple)):
+        counts = list(img_or_counts)
+    elif hasattr(img_or_counts, 'flatten') or hasattr(img_or_counts, 'ravel'):
+        try:
+            from PIL import Image as _PILImage
+            counts = _PILImage.fromarray(img_or_counts).convert('L').histogram()
+        except Exception:
+            counts = [0] * 256
+            for val in img_or_counts.ravel():
+                counts[int(val)] += 1
+    else:
+        counts = [0] * 256
+
+    total = sum(counts)
+    if total == 0:
         return 127
 
-    # OTSU 对单一灰度值的图片没有可用的类间方差；直接给出稳定阈值。
-    nonzero_bins = np.flatnonzero(counts)
+    nonzero_bins = [i for i, c in enumerate(counts) if c > 0]
     if len(nonzero_bins) == 1:
-        return max(0, int(nonzero_bins[0]) - 1)
+        return max(0, nonzero_bins[0] - 1)
 
-    p = counts / counts.sum()
-    omega = np.cumsum(p)
-    mu = np.cumsum(p * np.arange(256))
-    mu_t = mu[-1]
-    
-    with np.errstate(divide='ignore', invalid='ignore'):
-        sigma_b_squared = (mu_t * omega - mu)**2 / (omega * (1 - omega))
-        
-    if np.all(np.isnan(sigma_b_squared)):
-        return 127
-    return int(np.nanargmax(sigma_b_squared))
+    sum_total = sum(i * counts[i] for i in range(256))
+    weight_b = 0
+    sum_b = 0
+    max_var = -1.0
+    threshold = 127
+
+    for t in range(256):
+        weight_b += counts[t]
+        if weight_b == 0:
+            continue
+        weight_f = total - weight_b
+        if weight_f == 0:
+            break
+
+        sum_b += t * counts[t]
+        mean_b = sum_b / weight_b
+        mean_f = (sum_total - sum_b) / weight_f
+        var = weight_b * weight_f * ((mean_b - mean_f) ** 2)
+
+        if var > max_var:
+            max_var = var
+            threshold = t
+
+    return threshold
 
 
 def parse_jp2_dpi(filepath):
@@ -730,15 +756,15 @@ def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options
         final_img = None
         try:
             gray_img = pil_img.convert('L')
-            img_array = np.array(gray_img)
 
             if str(settings.get('bin_method', '0')) == "0":
-                t_val = calculate_otsu_threshold(img_array)
+                t_val = calculate_otsu_threshold(gray_img)
             else:
                 t_val = int((settings.get('threshold_val', 50) / 100.0) * 255)
 
-            binary_array = (img_array > t_val).astype(np.uint8) * 255
-            final_img = Image.fromarray(binary_array).convert('1')
+            # 使用 Pillow 原生 C 级查找表(LUT)生成 1 位单色图，无需 numpy 内存占用与转换
+            lut = [255 if p > t_val else 0 for p in range(256)]
+            final_img = gray_img.point(lut, mode='1')
             output_path = f"{out_path_base}.tif"
             save_kwargs = {'compression': 'group4', 'dpi': norm_dpi}
 
