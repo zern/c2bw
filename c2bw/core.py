@@ -16,7 +16,7 @@ from PIL import Image, JpegImagePlugin, PdfImagePlugin, Jpeg2KImagePlugin
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     ArrayObject, NameObject, StreamObject,
-    BooleanObject, NumberObject, DictionaryObject, DecodedStreamObject
+    BooleanObject, NumberObject, DictionaryObject, DecodedStreamObject, ContentStream
 )
 from pypdf.filters import decode_stream_data
 import pypdf.filters
@@ -106,6 +106,259 @@ def _extract_raw_image_from_xobj(xobj):
     return None, None
 
 
+def _is_watermark_text(text):
+    if not text:
+        return False
+    s = str(text).lower()
+    for kw in ('watermark', 'water_mark', 'water-mark', 'shuiyin', 'shui_yin', 'stamp', '水印', '印章', '样张', 'sample', 'draft', '草稿'):
+        if kw in s:
+            return True
+    return False
+
+
+def _is_watermark_xobj_name(name):
+    if not name:
+        return False
+    s = str(name).lower()
+    for kw in ('watermark', 'water_mark', 'water-mark', 'shuiyin', 'shui_yin', 'stamp', 'logo', '水印', '印章'):
+        if kw in s:
+            return True
+    return False
+
+
+def _is_watermark_piece_info(piece_info):
+    if not piece_info:
+        return False
+    try:
+        s = str(piece_info).lower()
+        return ('watermark' in s or 'stamp' in s or '水印' in s)
+    except Exception:
+        return False
+
+
+def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None, cancel_event=None):
+    """
+    检查并清除 PDF 中所有可识别的水印：
+    1. 注释水印 (/Annots: /Watermark, /Stamp, 或含水印关键字的注释)
+    2. Form XObject 水印 (含 /PieceInfo 水印标识、名称或内容含水印关键字的表单对象)
+    3. 内容流标准结构水印 (/Artifact << /Subtype /Watermark >> ... BDC ... EMC)
+    4. 附加图章/网站Logo叠加小图 (在多图扫描页中，面积远小于正文扫描图的小图水印)
+
+    返回：(cleaned_pdf_path, watermark_count, temp_pdf_path)
+    - 若未检测到水印：返回 (pdf_path, 0, None)，无需重复保存与写入。
+    - 若清除水印：将净化后的 PDF 写入 output_pdf_path 或临时文件，返回相应路径与清除数量。
+    """
+    try:
+        reader = PdfReader(pdf_path)
+    except Exception:
+        return pdf_path, 0, None
+
+    total_pages = len(reader.pages)
+    if total_pages == 0:
+        return pdf_path, 0, None
+
+    writer = PdfWriter()
+    total_watermarks_removed = 0
+    pdf_was_modified = False
+
+    for idx, page in enumerate(reader.pages):
+        if cancel_event and cancel_event.is_set():
+            return pdf_path, 0, None
+
+        page_num = idx + 1
+        page_wm_count = 0
+
+        # --- 1. 清理注释水印 (/Annots) ---
+        annots = page.get('/Annots')
+        if annots:
+            try:
+                annots_obj = annots.get_object() if hasattr(annots, 'get_object') else annots
+                if isinstance(annots_obj, (list, ArrayObject)):
+                    kept_annots = ArrayObject()
+                    for a in annots_obj:
+                        a_dict = a.get_object() if hasattr(a, 'get_object') else a
+                        if not isinstance(a_dict, dict):
+                            kept_annots.append(a)
+                            continue
+
+                        subtype = str(a_dict.get('/Subtype', ''))
+                        if subtype in ('/Watermark', '/Stamp'):
+                            page_wm_count += 1
+                            continue
+
+                        is_wm = False
+                        for k in ('/Contents', '/T', '/NM', '/Subj', '/RC'):
+                            val = a_dict.get(k)
+                            if val and _is_watermark_text(val):
+                                is_wm = True
+                                break
+                        if not is_wm:
+                            ap = a_dict.get('/AP')
+                            if ap and _is_watermark_text(ap):
+                                is_wm = True
+
+                        if is_wm:
+                            page_wm_count += 1
+                        else:
+                            kept_annots.append(a)
+
+                    if len(kept_annots) < len(annots_obj):
+                        if len(kept_annots) == 0:
+                            del page[NameObject('/Annots')]
+                        else:
+                            page[NameObject('/Annots')] = kept_annots
+            except Exception:
+                pass
+
+        # --- 2. 识别并收集水印 XObject ---
+        wm_xobj_names = set()
+        res = page.get('/Resources')
+        res_obj = res.get_object() if hasattr(res, 'get_object') else res
+        if res_obj and isinstance(res_obj, dict):
+            xobjs = res_obj.get('/XObject')
+            xobjs_obj = xobjs.get_object() if hasattr(xobjs, 'get_object') else xobjs
+            if isinstance(xobjs_obj, dict):
+                img_sizes = {}
+                for k, v in xobjs_obj.items():
+                    v_obj = v.get_object() if hasattr(v, 'get_object') else v
+                    if not hasattr(v_obj, 'get'):
+                        continue
+                    st = str(v_obj.get('/Subtype', ''))
+                    if st == '/Form':
+                        if _is_watermark_xobj_name(k) or _is_watermark_piece_info(v_obj.get('/PieceInfo')):
+                            wm_xobj_names.add(str(k))
+                        else:
+                            try:
+                                stream_data = v_obj.get_data()
+                                if stream_data and _is_watermark_text(stream_data.decode('latin1', errors='ignore')):
+                                    wm_xobj_names.add(str(k))
+                            except Exception:
+                                pass
+                    elif st == '/Image':
+                        try:
+                            w = int(v_obj.get('/Width', 0))
+                            h = int(v_obj.get('/Height', 0))
+                            img_sizes[k] = (w, h, v_obj)
+                            if _is_watermark_xobj_name(k):
+                                wm_xobj_names.add(str(k))
+                        except Exception:
+                            pass
+
+                # 启发式：多图扫描页面中的水印/LOGO过滤
+                if len(img_sizes) > 1:
+                    max_k, (max_w, max_h, _) = max(img_sizes.items(), key=lambda item: item[1][0] * item[1][1])
+                    max_area = max_w * max_h
+                    if max_area >= 400000:
+                        for k, (w, h, obj) in img_sizes.items():
+                            if k == max_k:
+                                continue
+                            area = w * h
+                            ratio = area / max_area
+                            has_mask = bool(obj.get('/SMask') or obj.get('/Mask'))
+                            is_small = (w < 300 and h < 300) or area < 100000
+                            name_str = str(k).lower()
+                            has_wm_tag = any(sub in name_str for sub in ('logo', 'wm', 'mark', 'icon', 'stamp', 'ad', 'water', 'shuiyin'))
+                            if ratio < 0.15 and (has_mask or is_small or has_wm_tag or ratio < 0.05):
+                                wm_xobj_names.add(str(k))
+
+        # --- 3. 清理内容流 (/Contents) 中的水印指令与 /Artifact 结构块 ---
+        contents = page.get('/Contents')
+        if contents:
+            try:
+                cs = ContentStream(contents, reader)
+                new_ops = []
+                skip_depth = 0
+                modified_cs = False
+
+                for operands, operator in cs.operations:
+                    op_name = operator.decode('latin1') if isinstance(operator, bytes) else str(operator)
+
+                    # 检测 /Artifact 结构标记块 (如 /Artifact << /Subtype /Watermark >> BDC)
+                    if op_name == 'BDC':
+                        op_str = str(operands)
+                        is_wm_artifact = (
+                            ('/Artifact' in op_str and ('/Watermark' in op_str or 'watermark' in op_str.lower()))
+                            or any(str(name) in op_str for name in wm_xobj_names)
+                        )
+                        if is_wm_artifact:
+                            skip_depth += 1
+                            modified_cs = True
+                            continue
+
+                    if skip_depth > 0:
+                        if op_name == 'EMC':
+                            skip_depth -= 1
+                        continue
+
+                    # 检测 XObject 绘制指令 (Do)
+                    if op_name == 'Do' and operands:
+                        target = str(operands[0])
+                        target_clean = target.lstrip('/')
+                        is_wm_do = (
+                            target in wm_xobj_names
+                            or f"/{target_clean}" in wm_xobj_names
+                            or target_clean in [n.lstrip('/') for n in wm_xobj_names]
+                        )
+                        if is_wm_do:
+                            modified_cs = True
+                            page_wm_count += 1
+                            continue
+
+                    new_ops.append((operands, operator))
+
+                if modified_cs:
+                    cs.operations = new_ops
+                    page[NameObject('/Contents')] = cs
+            except Exception:
+                pass
+
+        # --- 4. 从 /Resources /XObject 中移除水印对象 ---
+        if res_obj and isinstance(res_obj, dict) and wm_xobj_names:
+            xobjs = res_obj.get('/XObject')
+            xobjs_obj = xobjs.get_object() if hasattr(xobjs, 'get_object') else xobjs
+            if isinstance(xobjs_obj, dict):
+                for k in list(wm_xobj_names):
+                    if k in xobjs_obj:
+                        del xobjs_obj[k]
+                        page_wm_count += 1
+                    else:
+                        alt_k = k.lstrip('/')
+                        if alt_k in xobjs_obj:
+                            del xobjs_obj[alt_k]
+                            page_wm_count += 1
+
+        if page_wm_count > 0:
+            pdf_was_modified = True
+            total_watermarks_removed += page_wm_count
+
+        writer.add_page(page)
+
+        if progress_callback:
+            progress_callback(page_num, total_pages, f"正在检测并清除 PDF 水印：{page_num} / {total_pages} 页...")
+
+    if not pdf_was_modified or total_watermarks_removed == 0:
+        return pdf_path, 0, None
+
+    # 保存净化后的 PDF
+    temp_path = None
+    if not output_pdf_path:
+        fd, temp_path = tempfile.mkstemp(prefix="c2bw_cleaned_wm_", suffix=".pdf")
+        os.close(fd)
+        output_pdf_path = temp_path
+
+    try:
+        with open(output_pdf_path, 'wb') as f:
+            writer.write(f)
+        return output_pdf_path, total_watermarks_removed, temp_path
+    except Exception:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except Exception:
+                pass
+        return pdf_path, 0, None
+
+
 def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cancel_event=None):
     """从图片打包型 PDF 中提取所有原始分页图片到指定目录（保持原图质量与参数，不作有损重压缩）。"""
     try:
@@ -147,6 +400,46 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
                         ]
             except Exception:
                 img_keys = []
+
+        # 启发式：若单页包含多张图片，检查是否存在附加的水印/Logo小图，避免将其提取为独立页面
+        if len(img_keys) > 1:
+            filtered_keys = []
+            img_info_list = []
+            for img_id in img_keys:
+                w, h = 0, 0
+                xobj = _resolve_pdf_xobject(page, img_id)
+                if xobj is not None:
+                    try:
+                        w = int(xobj.get('/Width', 0))
+                        h = int(xobj.get('/Height', 0))
+                    except Exception:
+                        pass
+                if w == 0 or h == 0:
+                    try:
+                        img_obj = page.images[img_id]
+                        w, h = img_obj.image.size
+                    except Exception:
+                        pass
+                name_str = str(img_id).lower()
+                img_info_list.append((img_id, w, h, w * h, name_str, xobj))
+
+            max_area = max(info[3] for info in img_info_list) if img_info_list else 0
+            if max_area >= 400000:
+                for img_id, w, h, area, name_str, xobj in img_info_list:
+                    if area == max_area:
+                        filtered_keys.append(img_id)
+                        continue
+                    ratio = area / max_area
+                    has_mask = False
+                    if xobj is not None:
+                        has_mask = bool(xobj.get('/SMask') or xobj.get('/Mask'))
+                    is_small = (w < 300 and h < 300) or area < 100000
+                    has_wm_tag = any(sub in name_str for sub in ('logo', 'wm', 'mark', 'icon', 'stamp', 'ad', 'water', 'shuiyin'))
+                    if ratio < 0.15 and (has_mask or is_small or has_wm_tag or ratio < 0.05):
+                        continue
+                    filtered_keys.append(img_id)
+                if filtered_keys:
+                    img_keys = filtered_keys
 
         page_extracted = []
         for img_id in img_keys:
@@ -224,6 +517,8 @@ def get_task_suffix(enable_crop, enable_binarize, size_opt_mode='original'):
 BACKEND_LOGS = {
     'zh-CN': {
         'status_scanning': '正在扫描文件...',
+        'status_checking_watermarks': '正在检测并清除 PDF 水印...',
+        'status_watermarks_cleaned': '已清除 {count} 处可清除水印，继续后续处理...',
         'status_extracting_pdf': '正在读取并提取 PDF 原始分页图片...',
         'status_organizing': '正在整理处理后的图片...',
         'status_packing_new_pdf': '正在打包生成新 PDF...',
@@ -244,6 +539,8 @@ BACKEND_LOGS = {
     },
     'zh-TW': {
         'status_scanning': '正在掃描檔案...',
+        'status_checking_watermarks': '正在檢測並清除 PDF 水印...',
+        'status_watermarks_cleaned': '已清除 {count} 處可清除水印，繼續後續處理...',
         'status_extracting_pdf': '正在讀取並提取 PDF 原始分頁圖片...',
         'status_organizing': '正在整理處理後的圖片...',
         'status_packing_new_pdf': '正在封裝生成新 PDF...',
@@ -264,6 +561,8 @@ BACKEND_LOGS = {
     },
     'ja': {
         'status_scanning': 'ファイルをスキャン中...',
+        'status_checking_watermarks': 'PDFの透かしを検出・削除中...',
+        'status_watermarks_cleaned': '{count} 個の透かしを削除しました。処理を続行します...',
         'status_extracting_pdf': 'PDFから元画像を読み込み抽出中...',
         'status_organizing': '処理済み画像を整理中...',
         'status_packing_new_pdf': '新規PDFを生成中...',
@@ -284,6 +583,8 @@ BACKEND_LOGS = {
     },
     'en': {
         'status_scanning': 'Scanning files...',
+        'status_checking_watermarks': 'Detecting and cleaning PDF watermarks...',
+        'status_watermarks_cleaned': 'Cleaned {count} removable watermarks, continuing...',
         'status_extracting_pdf': 'Reading and extracting images from PDF...',
         'status_organizing': 'Organizing processed images...',
         'status_packing_new_pdf': 'Generating new PDF...',
@@ -323,6 +624,7 @@ REPORT_TEXTS = {
         'bin_otsu': "局部动态自适应二值化 (默认)",
         'fmt_keep': "保持原格式与品质",
         'fmt_original': "原大图片（无优化）",
+        'fmt_original_pdf': "原大图片（清除水印）",
         'fmt_mobile': "精简尺寸（宽度≤2160px，JPEG 渐进质量 75）",
         'fmt_custom': "自定义参数（缩放 {scale}%，JPEG 渐进质量 {quality}）",
         'fmt_jpg80': "转换为 JPG (质量 80)",
@@ -343,6 +645,8 @@ REPORT_TEXTS = {
         'max_threads': "- 最大线程数: {val}",
         'sec_stats': "【图片与分页统计】",
         'input_stats_pdf': "- 原始文件包含的图片/分页数量: {count} 张 (从 PDF 提取)",
+        'pdf_watermark_cleaned': "- PDF 水印处理: 已成功检测并清除 {count} 处可清除水印（结构/注释/叠加水印）",
+        'pdf_watermark_none': "- PDF 水印处理: 未检测到可清除水印",
         'input_stats_dir': "- 原始文件包含的图片/分页数量: {count} 张",
         'output_stats_crop': "- 转换后的图片总量: {total} 张 (其中排除单页数量: {excluded} 张，裁切双页数量: {cropped} 张 -> 分割生成 {generated} 张)",
         'output_stats_nocrop_direct': "- 打包图片总量: {total} 张 (未启用裁切，全为单页)",
@@ -380,6 +684,7 @@ REPORT_TEXTS = {
         'bin_threshold': "全域固定閾值二值化 (閾值: {val})",
         'fmt_keep': "保持原格式與品質",
         'fmt_original': "原大圖片（無優化）",
+        'fmt_original_pdf': "原大圖片（清除水印）",
         'fmt_mobile': "精簡尺寸（寬度≤2160px，JPEG 漸進品質 75）",
         'fmt_custom': "自定義參數（縮放 {scale}%，JPEG 漸進品質 {quality}）",
         'fmt_jpg80': "轉換為 JPG (品質 80)",
@@ -400,6 +705,8 @@ REPORT_TEXTS = {
         'max_threads': "- 最大線程數: {val}",
         'sec_stats': "【圖片與分頁統計】",
         'input_stats_pdf': "- 原始檔案包含的圖片/分頁數量: {count} 張 (從 PDF 提取)",
+        'pdf_watermark_cleaned': "- PDF 水印處理: 已成功檢測並清除 {count} 處可清除水印（結構/註釋/疊加水印）",
+        'pdf_watermark_none': "- PDF 水印處理: 未檢測到可清除水印",
         'input_stats_dir': "- 原始檔案包含的圖片/分頁數量: {count} 張",
         'output_stats_crop': "- 轉換後的圖片總量: {total} 張 (其中排除單頁數量: {excluded} 張，裁切雙頁數量: {cropped} 張 -> 分割生成 {generated} 張)",
         'output_stats_nocrop_direct': "- 打包圖片總量: {total} 張 (未啟用裁切，全為單頁)",
@@ -437,6 +744,7 @@ REPORT_TEXTS = {
         'bin_threshold': "固定閾値2値化 (閾値: {val})",
         'fmt_keep': "元の形式と品質を維持",
         'fmt_original': "原寸大（最適化なし）",
+        'fmt_original_pdf': "原寸大（透かし消去）",
         'fmt_mobile': "縮小サイズ（幅≤2160px、プログレッシブ JPEG 品質 75）",
         'fmt_custom': "カスタム設定（縮小率 {scale}%、プログレッシブ JPEG 品質 {quality}）",
         'fmt_jpg80': "JPGに変換 (品質 80)",
@@ -457,6 +765,8 @@ REPORT_TEXTS = {
         'max_threads': "- 最大スレッド数: {val}",
         'sec_stats': "【画像およびページ統計】",
         'input_stats_pdf': "- 元ファイルに含まれる画像/ページ数: {count} 枚 (PDFから抽出)",
+        'pdf_watermark_cleaned': "- PDF透かし処理: {count} 個の透かしを検出して削除しました（構造/注釈/オーバーレイ透かし）",
+        'pdf_watermark_none': "- PDF透かし処理: 削除可能な透かしは検出されませんでした",
         'input_stats_dir': "- 元ファイルに含まれる画像/ページ数: {count} 枚",
         'output_stats_crop': "- 処理後の画像総数: {total} 枚 (除外された単一ページ: {excluded} 枚，裁断された見開き: {cropped} 枚 -> 分割生成 {generated} 枚)",
         'output_stats_nocrop_direct': "- パック画像総数: {total} 枚 (裁断無効、すべて単一ページ)",
@@ -494,6 +804,7 @@ REPORT_TEXTS = {
         'bin_threshold': "Fixed Threshold (Threshold: {val})",
         'fmt_keep': "Keep Original Format & Quality",
         'fmt_original': "Original Size (No Optimization)",
+        'fmt_original_pdf': "Original Size (Remove Watermarks)",
         'fmt_mobile': "Compact Size (Width ≤ 2160px, Progressive JPEG Q75)",
         'fmt_custom': "Custom Parameters (Scale {scale}%, Progressive JPEG Q{quality})",
         'fmt_jpg80': "Convert to JPG (Quality 80)",
@@ -514,6 +825,8 @@ REPORT_TEXTS = {
         'max_threads': "- Max Threads: {val}",
         'sec_stats': "[Image & Page Statistics]",
         'input_stats_pdf': "- Total input images/pages: {count} (Extracted from PDF)",
+        'pdf_watermark_cleaned': "- PDF Watermark Cleaning: Successfully detected and removed {count} removable watermarks",
+        'pdf_watermark_none': "- PDF Watermark Cleaning: No removable watermarks detected",
         'input_stats_dir': "- Total input images/pages: {count}",
         'output_stats_crop': "- Total output images: {total} (Excluded single pages: {excluded}, Cropped spreads: {cropped} -> Generated {generated} pages)",
         'output_stats_nocrop_direct': "- Total packed images: {total} (Crop disabled, all single pages)",
@@ -1134,7 +1447,10 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
     else:
         size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
         if size_opt_mode in ('original', 'keep'):
-            fmt = t.get('fmt_original', t.get('fmt_keep', '原大图片（无优化）'))
+            if is_pdf_mode:
+                fmt = t.get('fmt_original_pdf', '原大图片（清除水印）')
+            else:
+                fmt = t.get('fmt_original', t.get('fmt_keep', '原大图片（无优化）'))
         elif size_opt_mode == 'mobile':
             fmt = t.get('fmt_mobile', '精简尺寸（适合手机）')
         elif size_opt_mode == 'custom':
@@ -1143,7 +1459,10 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
                 quality=settings.get('custom_quality', 80),
             )
         else:
-            fmt = t.get('fmt_original', t.get('fmt_keep', '原大图片（无优化）'))
+            if is_pdf_mode:
+                fmt = t.get('fmt_original_pdf', '原大图片（清除水印）')
+            else:
+                fmt = t.get('fmt_original', t.get('fmt_keep', '原大图片（无优化）'))
         lines.append(t['color_disabled'].format(detail=fmt))
 
 
@@ -1182,6 +1501,12 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
     total_input = summary.get('total_input', summary.get('total', 0))
     if is_pdf_mode:
         lines.append(t['input_stats_pdf'].format(count=total_input))
+        wm_cleaned = summary.get('pdf_watermarks_cleaned')
+        if wm_cleaned is not None:
+            if wm_cleaned > 0:
+                lines.append(t['pdf_watermark_cleaned'].format(count=wm_cleaned))
+            else:
+                lines.append(t['pdf_watermark_none'])
     else:
         lines.append(t['input_stats_dir'].format(count=total_input))
 
@@ -1514,6 +1839,7 @@ _clean_cancelled_output = clean_cancelled_output
 __all__ = [
     'PDF_APPLICATION_NAME',
     'PDF_SPEC_VERSION',
+    'clean_pdf_watermarks',
     'extract_images_from_pdf',
     'get_task_suffix',
     'BACKEND_LOGS',

@@ -11,6 +11,7 @@ from c2bw.core import (
     save_image,
     get_jp2_save_options,
     build_single_pdf,
+    clean_pdf_watermarks,
     extract_images_from_pdf,
 )
 from c2bw.service import ImageProcessorService
@@ -24,6 +25,7 @@ __all__ = [
     "save_image",
     "get_jp2_save_options",
     "build_single_pdf",
+    "clean_pdf_watermarks",
     "extract_images_from_pdf",
     "ImageProcessorService",
     "main",

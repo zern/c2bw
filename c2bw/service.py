@@ -18,6 +18,7 @@ import webbrowser
 from c2bw.core import (
     PDF_APPLICATION_NAME,
     PDF_SPEC_VERSION,
+    clean_pdf_watermarks,
     extract_images_from_pdf,
     get_task_suffix,
     BACKEND_LOGS,
@@ -293,18 +294,13 @@ class ImageProcessorService:
             custom_scale = int(raw_settings.get('custom_scale', 80))
             custom_quality = int(raw_settings.get('custom_quality', 80))
 
-            if not enable_crop and not enable_binarize:
-                if not no_convert_pdf and size_opt_mode == 'original':
-                    return None, '请至少启用一种处理任务（裁切、黑白二值化或文件大小优化）。'
-
             pdf_dir = os.path.dirname(pdf_path)
             pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
-            if not enable_crop and not enable_binarize and no_convert_pdf and size_opt_mode == 'original':
-                task_dir = os.path.join(pdf_dir, pdf_name)
+            suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
+            task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
+            if no_convert_pdf:
                 final_pdf_path = ''
             else:
-                suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
-                task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
                 final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
 
             settings = {
@@ -449,10 +445,37 @@ class ImageProcessorService:
                 self.ui_events.put(('progress', (cur / total) * 100, msg))
 
             lang = get_system_language()
-            self.ui_events.put(('status', get_backend_text('status_extracting_pdf', lang)))
-            count, err = extract_images_from_pdf(
-                pdf_path, extract_dir, progress_callback=_progress, cancel_event=self.cancel_event
+            self.ui_events.put(('status', get_backend_text('status_checking_watermarks', lang)))
+            cleaned_pdf_path, wm_count, wm_temp_path = clean_pdf_watermarks(
+                pdf_path, progress_callback=_progress, cancel_event=self.cancel_event
             )
+            if self.cancel_event.is_set():
+                if wm_temp_path and os.path.exists(wm_temp_path):
+                    try:
+                        os.remove(wm_temp_path)
+                    except Exception:
+                        pass
+                with self.state_lock:
+                    self.is_processing = False
+                    self.phase = 'idle'
+                self.ui_events.put(('finish', self._clean_cancelled_output(extract_dir, lang=lang)))
+                return
+
+            if wm_count > 0:
+                self.ui_events.put(('status', get_backend_text('status_watermarks_cleaned', lang, count=wm_count)))
+
+            self.ui_events.put(('status', get_backend_text('status_extracting_pdf', lang)))
+            try:
+                count, err = extract_images_from_pdf(
+                    cleaned_pdf_path, extract_dir, progress_callback=_progress, cancel_event=self.cancel_event
+                )
+            finally:
+                if wm_temp_path and os.path.exists(wm_temp_path):
+                    try:
+                        os.remove(wm_temp_path)
+                    except Exception:
+                        pass
+
             with self.state_lock:
                 self.is_processing = False
                 self.phase = 'idle'
@@ -1049,13 +1072,42 @@ class ImageProcessorService:
         final_pdf = settings['final_pdf_path']
 
         lang = settings.get('lang') or get_system_language()
+
+        def _watermark_progress(cur, total, msg):
+            self.ui_events.put(('progress', (cur / total) * 100, msg))
+
+        self.ui_events.put(('status', get_backend_text('status_checking_watermarks', lang)))
+        cleaned_pdf_path, wm_count, wm_temp_path = clean_pdf_watermarks(
+            pdf_path, progress_callback=_watermark_progress, cancel_event=self.cancel_event
+        )
+        if self.cancel_event.is_set():
+            if wm_temp_path and os.path.exists(wm_temp_path):
+                try:
+                    os.remove(wm_temp_path)
+                except Exception:
+                    pass
+            self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'], lang=lang)))
+            return
+
+        settings['pdf_watermarks_cleaned'] = wm_count
+        if wm_count > 0:
+            self.ui_events.put(('status', get_backend_text('status_watermarks_cleaned', lang, count=wm_count)))
+
         self.ui_events.put(('status', get_backend_text('status_extracting_pdf', lang)))
         def _extract_progress(cur, total, msg):
             self.ui_events.put(('progress', (cur / total) * 100, msg))
 
-        extracted_count, err = extract_images_from_pdf(
-            pdf_path, raw_dir, progress_callback=_extract_progress, cancel_event=self.cancel_event
-        )
+        try:
+            extracted_count, err = extract_images_from_pdf(
+                cleaned_pdf_path, raw_dir, progress_callback=_extract_progress, cancel_event=self.cancel_event
+            )
+        finally:
+            if wm_temp_path and os.path.exists(wm_temp_path):
+                try:
+                    os.remove(wm_temp_path)
+                except Exception:
+                    pass
+
         if self.cancel_event.is_set():
             self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'], lang=lang)))
             return
@@ -1083,6 +1135,7 @@ class ImageProcessorService:
                 'errors': [],
                 'collision_groups': 0,
                 'images_kept': True,
+                'pdf_watermarks_cleaned': wm_count,
             }
             summary_msg = self._build_and_save_task_report(summary, raw_dir)
             self.ui_events.put(('finish', summary_msg))
@@ -1184,6 +1237,7 @@ class ImageProcessorService:
                 'errors': errors,
                 'collision_groups': collision_groups,
                 'images_kept': True,
+                'pdf_watermarks_cleaned': wm_count,
             }
             summary_msg = self._build_and_save_task_report(summary, raw_dir)
             self.ui_events.put(('finish', summary_msg))
@@ -1248,6 +1302,7 @@ class ImageProcessorService:
             'errors': errors,
             'collision_groups': collision_groups,
             'images_kept': False,
+            'pdf_watermarks_cleaned': wm_count,
         }
         summary_msg = self._build_and_save_task_report(
             summary, raw_dir,

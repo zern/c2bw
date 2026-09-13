@@ -250,7 +250,7 @@
             <div class="setting-row setting-row-top">
               <span class="setting-label">{{ t('labelSizeOpt') }}</span>
               <el-radio-group v-model="form.size_opt_mode" :disabled="processing">
-                <el-radio value="original">{{ t('optOriginal') }}</el-radio>
+                <el-radio value="original">{{ workMode === 'pdf' ? t('optOriginalPdf') : t('optOriginal') }}</el-radio>
                 <el-radio value="mobile">{{ t('optMobile') }}</el-radio>
                 <el-radio value="custom">{{ t('optCustom') }}</el-radio>
               </el-radio-group>
@@ -281,9 +281,9 @@
               </div>
             </div>
 
-            <p v-if="form.size_opt_mode === 'original'" class="setting-tip">{{ t('tipOriginal') }}</p>
-            <p v-else-if="form.size_opt_mode === 'mobile'" class="setting-tip">{{ t('tipMobile') }}</p>
-            <p v-else-if="form.size_opt_mode === 'custom'" class="setting-tip">{{ t('tipCustom') }}</p>
+            <p v-if="form.size_opt_mode === 'original'" class="setting-tip">{{ workMode === 'pdf' ? t('tipOriginalPdf') : t('tipOriginal') }}</p>
+            <p v-else-if="form.size_opt_mode === 'mobile'" class="setting-tip">{{ workMode === 'pdf' ? t('tipMobilePdf') : t('tipMobile') }}</p>
+            <p v-else-if="form.size_opt_mode === 'custom'" class="setting-tip">{{ workMode === 'pdf' ? t('tipCustomPdf') : t('tipCustom') }}</p>
           </div>
         </el-card>
 
@@ -709,10 +709,7 @@ const computedPdfTargetDir = computed(() => {
     suffix = t('pdfSuffixCustom')
   }
   if (!suffix) {
-    if (pdfForm.no_convert_pdf) {
-      return (dir ? dir + '\\' : '') + stem
-    }
-    return t('pdfSuffixNone')
+    return (dir ? dir + '\\' : '') + stem
   }
   return (dir ? dir + '\\' : '') + stem + suffix
 })
@@ -883,10 +880,6 @@ async function startTask() {
   if (workMode.value === 'pdf') {
     if (!pdfForm.pdf_path) {
       showError(t('errSelectPdf'))
-      return
-    }
-    if (!form.enable_crop && !form.enable_binarize && form.size_opt_mode === 'original' && !pdfForm.no_convert_pdf) {
-      showError(t('errSelectTask'))
       return
     }
     const targetDir = computedPdfTargetDir.value

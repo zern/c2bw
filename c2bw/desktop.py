@@ -624,6 +624,11 @@ class ImageProcessorApp:
         self.quality_entry = ttk.Entry(self.custom_opt_subframe, textvariable=self.custom_quality, width=5)
         self.quality_entry.pack(side=tk.LEFT)
 
+        self.size_opt_hint_label = ttk.Label(
+            self.non_bin_options_frame, text="", foreground="#6b7280", wraplength=560
+        )
+        self.size_opt_hint_label.grid(row=2, column=0, columnspan=2, sticky=tk.W, pady=(4, 0))
+
         # --- 3. 裁切参数区域 ---
         crop_frame = ttk.LabelFrame(main_frame, text="分页处理", padding="15")
         crop_frame.grid(row=3, column=0, sticky=tk.EW, pady=8)
@@ -714,6 +719,7 @@ class ImageProcessorApp:
         footer_label.grid(row=8, column=0, sticky=tk.EW, pady=(12, 6))
         
         self.toggle_bin_options()
+        self.toggle_size_opt_options()
         self.toggle_crop_options()
 
     def _update_scroll_region(self, _event=None):
@@ -785,10 +791,7 @@ class ImageProcessorApp:
         pdf_name = os.path.splitext(os.path.basename(path))[0]
         suffix = get_task_suffix(self.enable_crop.get(), self.enable_binarize.get(), size_opt_mode=self.size_opt_mode.get())
         if not suffix:
-            if self.pdf_no_convert.get():
-                self.pdf_target_preview.set(os.path.join(pdf_dir, pdf_name))
-            else:
-                self.pdf_target_preview.set("（请至少勾选一种任务：裁切、黑白或大小优化）")
+            self.pdf_target_preview.set(os.path.join(pdf_dir, pdf_name))
         else:
             self.pdf_target_preview.set(os.path.join(pdf_dir, f"{pdf_name}{suffix}"))
 
@@ -798,7 +801,7 @@ class ImageProcessorApp:
             if self.pdf_no_convert.get():
                 if not self.enable_crop.get() and not self.enable_binarize.get():
                     self.pdf_hint_label.config(
-                        text="提示: 仅提取 PDF 原始图片至同名目录，不进行后续处理与合并",
+                        text="提示: 仅清除水印并提取 PDF 原始图片至同名目录，不合并为 PDF",
                         foreground="#059669"
                     )
                 else:
@@ -807,19 +810,29 @@ class ImageProcessorApp:
                         foreground="#d97706"
                     )
             else:
-                self.pdf_hint_label.config(
-                    text="提示: 提取原图并完成处理后，将自动合并为新 PDF 并删除临时分页图片",
-                    foreground="#0284c7"
-                )
+                if not self.enable_crop.get() and not self.enable_binarize.get() and self.size_opt_mode.get() == 'original':
+                    self.pdf_hint_label.config(
+                        text="提示: 仅清除 PDF 中可清除的水印，并打包输出至同名目录与同名 PDF",
+                        foreground="#059669"
+                    )
+                else:
+                    self.pdf_hint_label.config(
+                        text="提示: 提取原图并完成处理后，将自动合并为新 PDF 并删除临时分页图片",
+                        foreground="#0284c7"
+                    )
 
     def _on_mode_changed(self):
-        if self.work_mode.get() == "pdf":
+        is_pdf = (self.work_mode.get() == "pdf")
+        if is_pdf:
             self.dir_frame.pack_forget()
             self.pdf_frame.pack(fill=tk.X)
+            self.rb_size_original.config(text="原大图片（清除水印）")
             self._update_pdf_target_preview()
         else:
             self.pdf_frame.pack_forget()
             self.dir_frame.pack(fill=tk.X)
+            self.rb_size_original.config(text="原大图片（无优化）")
+        self.toggle_size_opt_options()
 
     def select_pdf_file_for_mode(self):
         pdf_path = filedialog.askopenfilename(
@@ -927,6 +940,26 @@ class ImageProcessorApp:
             self.non_bin_format.set("keep")
         else:
             self.non_bin_format.set("jpg80")
+
+        is_pdf = (self.work_mode.get() == "pdf")
+        mode = self.size_opt_mode.get()
+        if hasattr(self, 'size_opt_hint_label') and self.size_opt_hint_label:
+            if is_pdf:
+                if mode == "original":
+                    hint = "说明: 仅清除PDF文件中可移除的水印，保持原始尺寸与格式输出。"
+                elif mode == "mobile":
+                    hint = "说明: 默认先清除水印，再调整为 2160px 宽，输出高质量渐进式 JPEG。"
+                else:
+                    hint = "说明: 默认先清除水印，再自由调整缩放比例与 JPEG 质量。"
+            else:
+                if mode == "original":
+                    hint = "说明: 默认项不做调整，保持原始尺寸与格式输出。"
+                elif mode == "mobile":
+                    hint = "说明: 限制最长边不超过 2160px，并转换为高质量 JPG，缩减体积。"
+                else:
+                    hint = "说明: 按指定比例缩放并压缩为指定质量的 JPG。"
+            self.size_opt_hint_label.config(text=hint)
+
         self._update_pdf_hint()
 
     def toggle_bin_options(self):
@@ -1223,11 +1256,7 @@ class ImageProcessorApp:
     def start_processing(self):
         if self.is_processing: return
         if not self.enable_binarize.get() and not self.enable_crop.get():
-            if self.work_mode.get() == "pdf":
-                if not self.pdf_no_convert.get():
-                    messagebox.showwarning("操作无效", "请至少勾选一种处理任务（裁切或黑白二值化）！")
-                    return
-            else:
+            if self.work_mode.get() != "pdf":
                 if self.non_bin_format.get() == 'keep' and not self.enable_pdf.get():
                     messagebox.showwarning("操作无效", "请至少启用一种处理任务（色彩处理或分页裁切），或选择转为 JPG，或勾选合并输出为 PDF！")
                     return
@@ -1245,15 +1274,11 @@ class ImageProcessorApp:
             no_convert_pdf = self.pdf_no_convert.get()
 
             size_opt_mode = self.size_opt_mode.get()
-            if not enable_crop and not enable_binarize and size_opt_mode == 'original':
-                if not no_convert_pdf:
-                    messagebox.showwarning("操作无效", "请至少勾选一种处理任务（裁切、黑白二值化或文件大小优化）！")
-                    return
-                task_dir = os.path.join(pdf_dir, pdf_name)
+            suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
+            task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
+            if no_convert_pdf:
                 final_pdf_path = ''
             else:
-                suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
-                task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
                 final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
 
             try:
@@ -1312,17 +1337,30 @@ class ImageProcessorApp:
                 'enable_pdf': not no_convert_pdf,
             }
 
-            if not enable_crop and not enable_binarize and no_convert_pdf:
-                confirm_msg = (
-                    f"将直接从 PDF 提取原始图片至同名目录（不进行裁切、色彩处理或转 PDF）：\n\n"
-                    f"PDF 文件：{pdf_path}\n"
-                    f"提取目录：{task_dir}\n\n"
-                    f"是否确认开始？"
-                )
+            if not enable_crop and not enable_binarize and size_opt_mode == 'original':
+                if no_convert_pdf:
+                    confirm_msg = (
+                        f"将直接从 PDF 提取原始图片至同名目录（仅清除水印，不进行裁切、色彩处理或转 PDF）：\n\n"
+                        f"PDF 文件：{pdf_path}\n"
+                        f"提取目录：{task_dir}\n\n"
+                        f"是否确认开始？"
+                    )
+                else:
+                    confirm_msg = (
+                        f"将对 PDF 依次执行：\n"
+                        f"1. 从 PDF 提取原始分页图片并清除水印\n"
+                        f"2. 保持原始尺寸与格式输出\n"
+                        f"3. 汇总生成新 PDF\n"
+                        f"4. 自动清理临时分页图片，仅保留新 PDF\n\n"
+                        f"PDF 文件：{pdf_path}\n"
+                        f"生成目录：{task_dir}\n"
+                        f"输出文件：{final_pdf_path}\n\n"
+                        f"是否确认开始？"
+                    )
             elif no_convert_pdf:
                 confirm_msg = (
                     f"将对 PDF 依次执行：\n"
-                    f"1. 从 PDF 提取原始分页图片\n"
+                    f"1. 从 PDF 提取原始分页图片并清除水印\n"
                     f"2. 按勾选任务批量处理\n"
                     f"3. 保留处理后的图片文件夹（不生成 PDF）\n\n"
                     f"PDF 文件：{pdf_path}\n"
@@ -1332,12 +1370,13 @@ class ImageProcessorApp:
             else:
                 confirm_msg = (
                     f"将对 PDF 依次执行：\n"
-                    f"1. 从 PDF 提取原始分页图片\n"
+                    f"1. 从 PDF 提取原始分页图片并清除水印\n"
                     f"2. 按勾选任务批量处理\n"
                     f"3. 汇总生成新 PDF\n"
                     f"4. 自动清理临时分页图片，仅保留新 PDF\n\n"
                     f"PDF 文件：{pdf_path}\n"
-                    f"生成目录：{task_dir}\n\n"
+                    f"生成目录：{task_dir}\n"
+                    f"输出文件：{final_pdf_path}\n\n"
                     f"是否确认开始？"
                 )
             if not messagebox.askyesno("开始 PDF 处理任务", confirm_msg, icon='question'):
