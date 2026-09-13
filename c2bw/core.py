@@ -969,8 +969,8 @@ def process_single_image(src_path, rel_path, filename, output_stem, settings,
                     w, h = img.size
                     aspect_ratio = w / h
 
-        is_excluded = settings.get('enable_crop') and (aspect_ratio < settings.get('exclude_ratio', 0.7))
-        if not settings.get('enable_crop') or aspect_ratio < settings.get('exclude_ratio', 0.7):
+        is_excluded = settings.get('enable_crop') and (aspect_ratio < settings.get('exclude_ratio', 0.8))
+        if not settings.get('enable_crop') or aspect_ratio < settings.get('exclude_ratio', 0.8):
             # 未二值化、保持原大且未实际裁切时，直接复制源文件以完整保留 JPEG 品质与元数据。
             if not settings.get('enable_binarize') and size_opt_mode in ('original', 'keep'):
                 output_path = os.path.join(out_dir, f"{base_name}{original_ext}")
@@ -1155,7 +1155,7 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
         crop_det = t['crop_width'].format(p=p)
         if overlap > 0:
             crop_det += t['crop_overlap'].format(overlap=overlap)
-        lines.append(t['crop_enabled'].format(ratio=settings.get('exclude_ratio', 0.7), crop_detail=crop_det, dir_desc=d))
+        lines.append(t['crop_enabled'].format(ratio=settings.get('exclude_ratio', 0.8), crop_detail=crop_det, dir_desc=d))
     else:
         lines.append(t['crop_disabled'])
 

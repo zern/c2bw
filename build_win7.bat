@@ -34,7 +34,7 @@ echo ==========================================================
 echo.
 echo ==========================================================
 echo  Windows 7 build complete:
-echo  - dist\智能图像预处理工具 v3.6_Win7.exe
+echo  - dist\智能图像预处理工具 v3.7_Win7.exe
 echo  - dist\c2bw_win7.exe
-echo  - dist\c2bw_v3.6_win7.exe
+echo  - dist\c2bw_v3.7_win7.exe
 echo ==========================================================

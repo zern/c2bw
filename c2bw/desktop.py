@@ -400,7 +400,7 @@ class ImageProcessorApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("智能图像预处理工具 v3.6")
+        self.root.title("智能图像预处理工具 v3.7")
         # 在较矮的屏幕上留出系统任务栏空间，其他内容通过滚动条访问。
         window_height = min(820, max(480, self.root.winfo_screenheight() - 100))
         self.root.geometry(f"700x{window_height}")
@@ -440,7 +440,7 @@ class ImageProcessorApp:
         self.enable_crop = tk.BooleanVar(value=True) 
         self.crop_percent = tk.IntVar(value=50)   
         self.crop_direction = tk.StringVar(value="R2L") 
-        self.exclude_ratio = tk.DoubleVar(value=0.7) 
+        self.exclude_ratio = tk.DoubleVar(value=0.8) 
         self.enable_pdf = tk.BooleanVar(value=False)
         self.keep_images_after_pdf = tk.BooleanVar(value=False)
         self.pdf_no_convert = tk.BooleanVar(value=False)
@@ -636,7 +636,7 @@ class ImageProcessorApp:
 
         ttk.Label(self.crop_options_frame, text="排除单页比例:").grid(row=0, column=0, sticky=tk.W, pady=5)
         ttk.Entry(self.crop_options_frame, textvariable=self.exclude_ratio, width=8).grid(row=0, column=1, sticky=tk.W, pady=5, padx=10)
-        ttk.Label(self.crop_options_frame, text="(宽/高 < 此值，强制跳过裁切，默认0.7)").grid(row=0, column=2, sticky=tk.W, pady=5)
+        ttk.Label(self.crop_options_frame, text="(宽/高 < 此值，强制跳过裁切，默认0.8)").grid(row=0, column=2, sticky=tk.W, pady=5)
 
         ttk.Label(self.crop_options_frame, text="分割比例(%):").grid(row=1, column=0, sticky=tk.W, pady=5)
         ttk.Entry(self.crop_options_frame, textvariable=self.crop_percent, width=8).grid(row=1, column=1, sticky=tk.W, pady=5, padx=10)
@@ -980,7 +980,7 @@ class ImageProcessorApp:
         try:
             ex_ratio = float(self.exclude_ratio.get())
         except (ValueError, tk.TclError):
-            ex_ratio = 0.7
+            ex_ratio = 0.8
 
         try:
             split_pct = int(self.crop_percent.get())
@@ -1283,7 +1283,7 @@ class ImageProcessorApp:
             try:
                 ex_ratio = self.exclude_ratio.get()
             except tk.TclError:
-                ex_ratio = 0.7
+                ex_ratio = 0.8
             if enable_crop and not 0 < ex_ratio:
                 messagebox.showwarning("单页比例无效", "排除单页比例必须大于 0。")
                 return

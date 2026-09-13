@@ -49,8 +49,8 @@ if not exist "dist" mkdir dist
 echo.
 echo ==========================================================
 echo  Windows 11 build complete:
-echo  - dist\智能图像预处理工具 v3.6.exe
-echo  - dist\智能图像预处理工具 v3.6_Win11.exe
+echo  - dist\智能图像预处理工具 v3.7.exe
+echo  - dist\智能图像预处理工具 v3.7_Win11.exe
 echo  - dist\c2bw_win11.exe
 echo  - dist\c2bw-windows-x64.exe
 echo ==========================================================

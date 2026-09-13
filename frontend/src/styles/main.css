@@ -72,6 +72,36 @@ body {
   gap: 12px;
 }
 
+.github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 24px;
+  padding: 0 9px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 4px;
+  border: 1px solid rgba(255, 255, 255, 0.42);
+  color: #ffffff;
+  background: rgba(255, 255, 255, 0.08);
+  text-decoration: none;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-sizing: border-box;
+}
+
+.github-link:hover {
+  background: rgba(255, 255, 255, 0.22);
+  border-color: rgba(255, 255, 255, 0.75);
+  color: #ffffff;
+}
+
+.github-link .github-icon {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
 .version-tag {
   border-color: rgba(255, 255, 255, 0.42) !important;
   color: #ffffff !important;
