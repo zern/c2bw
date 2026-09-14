@@ -2,7 +2,7 @@
 c2bw - 智能图像预处理与重构工具包
 """
 
-__version__ = "3.7"
+__version__ = "3.8"
 __author__ = "weiceng © 漢籍合璧"
 
 from c2bw.core import (

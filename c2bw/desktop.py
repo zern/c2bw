@@ -400,7 +400,7 @@ class ImageProcessorApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("智能图像预处理工具 v3.7")
+        self.root.title("智能图像预处理工具 v3.8")
         # 在较矮的屏幕上留出系统任务栏空间，其他内容通过滚动条访问。
         window_height = min(820, max(480, self.root.winfo_screenheight() - 100))
         self.root.geometry(f"700x{window_height}")

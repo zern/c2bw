@@ -61,6 +61,41 @@ def _resolve_pdf_xobject(page, img_id):
     return curr
 
 
+def _normalize_extracted_tiff(data):
+    """
+    规范化从 PDF 提取的 TIFF 图像数据（尤其是 CCITTFaxDecode）。
+    1. 修正 pypdf 生成的手工 TIFF 头缺陷（next IFD 偏移量被误打包为 2 字节短整型导致的越界读入与虚假多页）。
+    2. 统一保存为标准的单 Strip（RowsPerStrip = 高度）及规范的 Tag 262 (PhotometricInterpretation = 1, BlackIsZero)。
+    3. 智能极性校验：针对黑白二值古籍/文档，若四角全黑且黑色像素占多数，自动校正为标准白底黑字。
+    4. 消除 EXIF 损坏警告，保证在 Photoshop、IrfanView、Windows 查看器等各类软件中 100% 呈现标准白底黑字。
+    """
+    if not data:
+        return data
+    try:
+        bio = io.BytesIO(data)
+        with Image.open(bio) as im:
+            if im.format == 'TIFF' and (im.mode == '1' or getattr(im, 'tag_v2', {}).get(259) == 4):
+                if im.mode == '1':
+                    w, h = im.size
+                    corners = [im.getpixel((0, 0)), im.getpixel((w - 1, 0)),
+                               im.getpixel((0, h - 1)), im.getpixel((w - 1, h - 1))]
+                    if all(c == 0 for c in corners):
+                        colors = im.getcolors(maxcolors=10)
+                        if colors:
+                            c_dict = {c[1]: c[0] for c in colors}
+                            if c_dict.get(0, 0) > 0.6 * (w * h):
+                                im = ImageOps.invert(im.convert('L')).convert('1')
+                out_bio = io.BytesIO()
+                info = TiffImagePlugin.ImageFileDirectory_v2()
+                info[278] = im.height
+                info[262] = 1
+                im.save(out_bio, format='TIFF', compression='group4', tiffinfo=info)
+                return out_bio.getvalue()
+    except Exception:
+        pass
+    return data
+
+
 def _extract_raw_image_from_xobj(xobj):
     """直接从 XObject 提取未重压缩的原始图片数据流，保证 100% 原始画质与参数不变。"""
     if not isinstance(xobj, StreamObject):
@@ -82,7 +117,32 @@ def _extract_raw_image_from_xobj(xobj):
         data = None
 
     if data:
-        # 兼容处理：若 PDF 为图像定义了反相映射 /Decode [1 0]，保持与 PDF 视觉呈现一致
+        should_invert = False
+
+        # 1. 检查 /DecodeParms 中的 /BlackIs1 属性
+        # 在 PDF 规范中，当 /Filter 为 /CCITTFaxDecode 时，若 /BlackIs1 为 True，
+        # 则 1 代表黑、0 代表白，与标准 PDF 图像默认约定相反。由于 pypdf 打包 TIFF 头时
+        # 硬编码了 Tag 262 = 0 (WhiteIsZero) 且完全忽略了 /BlackIs1，导致 Pillow 解码时
+        # 产生黑白颠倒。此处严格按 PDF 规范反转极性以恢复真实的白底黑字。
+        dec_parms = xobj.get('/DecodeParms')
+        if hasattr(dec_parms, 'get_object'):
+            dec_parms = dec_parms.get_object()
+        parms_list = []
+        if isinstance(dec_parms, (list, tuple, ArrayObject)):
+            parms_list = [p.get_object() if hasattr(p, 'get_object') else p for p in dec_parms]
+        elif isinstance(dec_parms, dict):
+            parms_list = [dec_parms]
+
+        for p in parms_list:
+            if isinstance(p, dict):
+                b1 = p.get('/BlackIs1')
+                if hasattr(b1, 'get_object'):
+                    b1 = b1.get_object()
+                if bool(b1):
+                    should_invert = not should_invert
+                    break
+
+        # 2. 检查 /Decode 反相映射 [1 0]
         dec = xobj.get('/Decode')
         if hasattr(dec, 'get_object'):
             dec = dec.get_object()
@@ -90,21 +150,27 @@ def _extract_raw_image_from_xobj(xobj):
             try:
                 dec_vals = [float(x.get_object() if hasattr(x, 'get_object') else x) for x in dec[:2]]
                 if dec_vals[0] > dec_vals[1]:
-                    bio = io.BytesIO(data)
-                    with Image.open(bio) as im:
-                        if im.mode == '1':
-                            im_inv = ImageOps.invert(im.convert('L')).convert('1')
-                        else:
-                            im_inv = ImageOps.invert(im)
-                        out_bio = io.BytesIO()
-                        if im.format == 'TIFF':
-                            info = TiffImagePlugin.ImageFileDirectory_v2()
-                            info[278] = im.height
-                            info[262] = 1
-                            im_inv.save(out_bio, format='TIFF', compression='group4', tiffinfo=info)
-                        else:
-                            im_inv.save(out_bio, format=im.format or 'PNG')
-                        data = out_bio.getvalue()
+                    should_invert = not should_invert
+            except Exception:
+                pass
+
+        if should_invert:
+            try:
+                bio = io.BytesIO(data)
+                with Image.open(bio) as im:
+                    if im.mode == '1':
+                        im_inv = ImageOps.invert(im.convert('L')).convert('1')
+                    else:
+                        im_inv = ImageOps.invert(im)
+                    out_bio = io.BytesIO()
+                    if im.format == 'TIFF':
+                        info = TiffImagePlugin.ImageFileDirectory_v2()
+                        info[278] = im.height
+                        info[262] = 1
+                        im_inv.save(out_bio, format='TIFF', compression='group4', tiffinfo=info)
+                    else:
+                        im_inv.save(out_bio, format=im.format or 'PNG')
+                    data = out_bio.getvalue()
             except Exception:
                 pass
 
@@ -112,7 +178,7 @@ def _extract_raw_image_from_xobj(xobj):
         if data.startswith(b'\xff\xd8'):
             return '.jpg', data
         if data.startswith(b'II*\x00') or data.startswith(b'MM\x00*'):
-            return '.tif', data
+            return '.tif', _normalize_extracted_tiff(data)
         if data.startswith(b'\x89PNG\r\n\x1a\n'):
             return '.png', data
         if data.startswith(b'\x00\x00\x00\x0cjP  ') or data.startswith(b'\xffO\xffQ'):
@@ -127,7 +193,7 @@ def _extract_raw_image_from_xobj(xobj):
         if last_filter in ('/JPXDecode',):
             return '.jp2', data
         if last_filter in ('/CCITTFaxDecode',):
-            return '.tif', data
+            return '.tif', _normalize_extracted_tiff(data)
 
     return None, None
 
@@ -498,6 +564,9 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
                 ext = '.jpg'
             elif ext == '.tiff':
                 ext = '.tif'
+
+            if ext == '.tif' and data:
+                data = _normalize_extracted_tiff(data)
 
             page_extracted.append((ext, data))
 

@@ -36,7 +36,7 @@
           </svg>
           <span>GitHub</span>
         </a>
-        <el-tag class="version-tag" size="small" effect="plain">v3.7</el-tag>
+        <el-tag class="version-tag" size="small" effect="plain">v3.8</el-tag>
         
         <!-- 语言选择 -->
         <el-dropdown trigger="click" @command="changeLanguage" class="lang-dropdown">
