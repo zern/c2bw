@@ -12,7 +12,7 @@ import struct
 import tempfile
 import threading
 import locale
-from PIL import Image, JpegImagePlugin, PdfImagePlugin, Jpeg2KImagePlugin
+from PIL import Image, JpegImagePlugin, PdfImagePlugin, Jpeg2KImagePlugin, TiffImagePlugin, ImageOps
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     ArrayObject, NameObject, StreamObject,
@@ -82,6 +82,32 @@ def _extract_raw_image_from_xobj(xobj):
         data = None
 
     if data:
+        # 兼容处理：若 PDF 为图像定义了反相映射 /Decode [1 0]，保持与 PDF 视觉呈现一致
+        dec = xobj.get('/Decode')
+        if hasattr(dec, 'get_object'):
+            dec = dec.get_object()
+        if isinstance(dec, (list, tuple, ArrayObject)) and len(dec) >= 2:
+            try:
+                dec_vals = [float(x.get_object() if hasattr(x, 'get_object') else x) for x in dec[:2]]
+                if dec_vals[0] > dec_vals[1]:
+                    bio = io.BytesIO(data)
+                    with Image.open(bio) as im:
+                        if im.mode == '1':
+                            im_inv = ImageOps.invert(im.convert('L')).convert('1')
+                        else:
+                            im_inv = ImageOps.invert(im)
+                        out_bio = io.BytesIO()
+                        if im.format == 'TIFF':
+                            info = TiffImagePlugin.ImageFileDirectory_v2()
+                            info[278] = im.height
+                            info[262] = 1
+                            im_inv.save(out_bio, format='TIFF', compression='group4', tiffinfo=info)
+                        else:
+                            im_inv.save(out_bio, format=im.format or 'PNG')
+                        data = out_bio.getvalue()
+            except Exception:
+                pass
+
         # 1. 检查已知图像格式文件头魔数
         if data.startswith(b'\xff\xd8'):
             return '.jpg', data
@@ -1099,7 +1125,10 @@ def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options
             lut = [255 if p > t_val else 0 for p in range(256)]
             final_img = gray_img.point(lut, mode='1')
             output_path = f"{out_path_base}.tif"
-            save_kwargs = {'compression': 'group4', 'dpi': norm_dpi}
+            tiffinfo = TiffImagePlugin.ImageFileDirectory_v2()
+            tiffinfo[278] = final_img.height  # 强制单 Strip（RowsPerStrip = 高度），保证流完整不被截断
+            tiffinfo[262] = 1  # 统一为 BlackIsZero (1 为黑，0 为白)
+            save_kwargs = {'compression': 'group4', 'dpi': norm_dpi, 'tiffinfo': tiffinfo}
 
             save_image_atomically(
                 final_img,
@@ -1184,6 +1213,12 @@ def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options
         elif image_format == 'JPEG2000':
             if jp2_save_options:
                 save_opts.update(jp2_save_options)
+        if image_format == 'TIFF' and (pil_img.mode == '1' or (pil_img.format == 'TIFF' and getattr(pil_img, 'tag_v2', {}).get(259) == 4)):
+            tiffinfo = TiffImagePlugin.ImageFileDirectory_v2()
+            tiffinfo[278] = pil_img.height
+            tiffinfo[262] = 1
+            save_opts['compression'] = 'group4'
+            save_opts['tiffinfo'] = tiffinfo
         try:
             save_image_atomically(pil_img, output_path, image_format, write_lock=write_lock, **save_opts)
         except OSError:
@@ -1607,7 +1642,8 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
             if im.mode != '1':
                 im = im.convert('1')
             is_single_strip_g4 = False
-            if im.format == 'TIFF' and im.tag_v2.get(259) == 4:
+            # 仅当已是单 Strip、Group 4 且 PhotometricInterpretation == 1 (BlackIsZero) 时，可安全复用底层流
+            if im.format == 'TIFF' and getattr(im, 'tag_v2', {}).get(259) == 4 and getattr(im, 'tag_v2', {}).get(262, 1) == 1:
                 offsets = im.tag_v2.get(273)
                 counts = im.tag_v2.get(279)
                 if offsets is not None and not isinstance(offsets, (list, tuple)):
@@ -1616,19 +1652,20 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
                     counts = [counts]
                 if offsets and counts and len(offsets) == 1:
                     is_single_strip_g4 = True
-                    photometric = im.tag_v2.get(262, 1)
                     with open(image_path, 'rb') as f:
                         f.seek(int(offsets[0]))
                         ccitt_data = f.read(int(counts[0]))
 
             if not is_single_strip_g4:
                 bio = io.BytesIO()
-                im.save(bio, format='TIFF', compression='group4')
+                tiffinfo = TiffImagePlugin.ImageFileDirectory_v2()
+                tiffinfo[278] = h  # 强制单 Strip（RowsPerStrip = 高度），确保整页流完整不被截断
+                tiffinfo[262] = 1  # 统一为 BlackIsZero (1 为黑，0 为白)
+                im.save(bio, format='TIFF', compression='group4', tiffinfo=tiffinfo)
                 bio.seek(0)
                 with Image.open(bio) as t:
                     offsets = t.tag_v2[273]
                     counts = t.tag_v2[279]
-                    photometric = t.tag_v2.get(262, 1)
                     off = offsets[0] if isinstance(offsets, (list, tuple)) else offsets
                     cnt = counts[0] if isinstance(counts, (list, tuple)) else counts
                     bio.seek(int(off))
@@ -1648,7 +1685,7 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
                     NameObject('/K'): NumberObject(-1),
                     NameObject('/Columns'): NumberObject(w),
                     NameObject('/Rows'): NumberObject(h),
-                    NameObject('/BlackIs1'): BooleanObject(True if photometric != 0 else False),
+                    NameObject('/BlackIs1'): BooleanObject(True),
                 }),
             })
         elif ext in ('.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c'):
