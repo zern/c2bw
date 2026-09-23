@@ -136,7 +136,7 @@ jobs:
         include:
           - arch: x86_64
             name: Intel
-            runner: macos-13
+            runner: macos-15-intel
           - arch: arm64
             name: AppleSilicon
             runner: macos-14
@@ -170,7 +170,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt pyinstaller
-          python -m pip install pyobjc-core pyobjc-framework-Cocoa pyobjc-framework-WebKit
+          python -m pip install pyobjc-core pyobjc-framework-Cocoa pyobjc-framework-WebKit pyobjc-framework-Quartz
 
       - name: Build macOS single-file executable
         run: |
