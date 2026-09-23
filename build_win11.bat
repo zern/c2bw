@@ -12,6 +12,7 @@ if not exist "%PYTHON_EXE%" (
 echo ==========================================================
 echo  [1/4] Building Vue 3 + Element Plus Frontend (Vite)...
 echo ==========================================================
+set "NODE_OPTIONS=--max-old-space-size=4096"
 if exist "frontend\package.json" (
     cd frontend
     call npm run build
@@ -49,9 +50,5 @@ if not exist "dist" mkdir dist
 echo.
 echo ==========================================================
 echo  Windows 11 build complete:
-echo  - dist\智能图像预处理工具 v3.8.exe
-echo  - dist\智能图像预处理工具 v3.8_Win11.exe
-echo  - dist\c2bw_v3.8-x64.exe
-echo  - dist\c2bw_win11.exe
-echo  - dist\c2bw-windows-x64.exe
+echo  - dist\智能图像预处理工具 v3.9.exe
 echo ==========================================================

@@ -36,7 +36,7 @@
           </svg>
           <span>GitHub</span>
         </a>
-        <el-tag class="version-tag" size="small" effect="plain">v3.8</el-tag>
+        <el-tag class="version-tag" size="small" effect="plain">v3.9</el-tag>
         
         <!-- 语言选择 -->
         <el-dropdown trigger="click" @command="changeLanguage" class="lang-dropdown">
@@ -176,6 +176,22 @@
               :icon="Document"
               @click="selectPdfFileForMode"
             >{{ t('btnSelectFile') }}</el-button>
+          </div>
+
+          <div class="directory-row">
+            <label>{{ t('labelOutputDir') }}</label>
+            <el-input
+              v-model="pdfForm.output_dir"
+              :disabled="processing"
+              :placeholder="t('phPdfOutputDir')"
+              clearable
+            />
+            <el-button
+              :loading="directoryLoading === 'pdf_output_dir'"
+              :disabled="processing"
+              :icon="FolderOpened"
+              @click="selectDirectory('pdf_output_dir')"
+            >{{ t('btnBrowse') }}</el-button>
           </div>
 
           <div class="directory-row">
@@ -618,6 +634,7 @@ let isPolling = false
 
 const pdfForm = reactive({
   pdf_path: '',
+  output_dir: '',
   no_convert_pdf: false
 })
 
@@ -692,7 +709,7 @@ const computedPdfTargetDir = computed(() => {
   if (!pdfForm.pdf_path) return ''
   const path = pdfForm.pdf_path
   const lastSlash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-  const dir = lastSlash >= 0 ? path.substring(0, lastSlash) : ''
+  const defaultDir = lastSlash >= 0 ? path.substring(0, lastSlash) : ''
   const filename = lastSlash >= 0 ? path.substring(lastSlash + 1) : path
   const dotIdx = filename.lastIndexOf('.')
   const stem = dotIdx >= 0 ? filename.substring(0, dotIdx) : filename
@@ -708,10 +725,10 @@ const computedPdfTargetDir = computed(() => {
   } else if (form.size_opt_mode === 'custom') {
     suffix = t('pdfSuffixCustom')
   }
-  if (!suffix) {
-    return (dir ? dir + '\\' : '') + stem
-  }
-  return (dir ? dir + '\\' : '') + stem + suffix
+  const folderName = suffix ? stem + suffix : stem
+  const customOut = (pdfForm.output_dir || '').trim()
+  const baseDir = customOut ? customOut.replace(/[\\/]+$/, '') : defaultDir
+  return (baseDir ? baseDir + '\\' : '') + folderName
 })
 
 const phaseText = computed(() => {
@@ -798,40 +815,95 @@ function handleDragLeave(e) {
   isDragging.value = false
 }
 
+function applyDroppedResult(result) {
+  if (!result || !result.ok) {
+    showError(result ? result.error : t('errUnrecognizedDropPath'))
+    return
+  }
+  if (result.type === 'dir') {
+    workMode.value = 'dir'
+    form.source_dir = result.path
+    form.target_dir = result.suggested_target_dir
+    ElMessage.success(t('loadedInputDir') + ': ' + result.path)
+  } else if (result.type === 'pdf') {
+    workMode.value = 'pdf'
+    pdfForm.pdf_path = result.path
+    ElMessage.success(t('loadedPdfFile') + ': ' + result.path)
+  } else if (result.type === 'image') {
+    workMode.value = 'dir'
+    form.source_dir = result.parent_dir
+    form.target_dir = result.suggested_target_dir
+    ElMessage.success(t('loadedImageParentDir') + ': ' + result.parent_dir)
+  }
+}
+
 function handleDrop(e) {
   e.preventDefault()
   isDragging.value = false
-  if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-    const file = e.dataTransfer.files[0]
-    const p = file.path || file.name
-    if (p) {
-      applyDroppedPath(p)
+
+  let p = ''
+  if (e.dataTransfer) {
+    // 1. 优先尝试从文本流直接提取绝对路径（Everything、Total Commander、Directory Opus 等第三方工具拖拽时，OLE 拖拽流中均携带 CF_UNICODETEXT / text 真实磁盘路径）
+    try {
+      const textData = (e.dataTransfer.getData('text/plain') || e.dataTransfer.getData('text') || '').trim()
+      if (textData) {
+        const firstLine = textData.split(/[\r\n]+/)[0].replace(/^"|"$/g, '').trim()
+        if (firstLine.includes(':\\') || firstLine.includes(':/') || firstLine.startsWith('\\\\')) {
+          p = firstLine
+        }
+      }
+    } catch (_) {}
+
+    // 2. 尝试从 text/uri-list 获取
+    if (!p) {
+      try {
+        const uriList = (e.dataTransfer.getData('text/uri-list') || '').trim()
+        if (uriList.toLowerCase().startsWith('file:///')) {
+          const firstUri = uriList.split(/[\r\n]+/)[0].trim()
+          const u = new URL(firstUri)
+          p = decodeURIComponent(u.pathname).replace(/^\/([a-zA-Z]:)/, '$1')
+        }
+      } catch (_) {}
     }
+
+    // 3. 遍历其它所有 dataTransfer 类型检查是否存在 URL 或绝对路径
+    if (!p) {
+      try {
+        const types = e.dataTransfer.types || []
+        for (let i = 0; i < types.length; i++) {
+          const t = types[i]
+          const data = (e.dataTransfer.getData(t) || '').trim()
+          if (data) {
+            const firstLine = data.split(/[\r\n]+/)[0].replace(/^"|"$/g, '').trim()
+            if (firstLine.toLowerCase().startsWith('file:///')) {
+              const u = new URL(firstLine)
+              p = decodeURIComponent(u.pathname).replace(/^\/([a-zA-Z]:)/, '$1')
+              break
+            } else if (firstLine.includes(':\\') || firstLine.includes(':/') || firstLine.startsWith('\\\\')) {
+              p = firstLine
+              break
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 4. 从 DOM files 获取（如 Windows 原生资源管理器拖拽，或未包含文本流的普通拖拽）
+    if (!p && e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const file = e.dataTransfer.files[0]
+      p = file.path || file.name
+    }
+  }
+
+  if (p) {
+    applyDroppedPath(p)
   }
 }
 
 async function applyDroppedPath(path) {
   try {
     const result = await callApi('handle_dropped_path', path)
-    if (!result || !result.ok) {
-      showError(result ? result.error : t('errUnrecognizedDropPath'))
-      return
-    }
-    if (result.type === 'dir') {
-      workMode.value = 'dir'
-      form.source_dir = result.path
-      form.target_dir = result.suggested_target_dir
-      ElMessage.success(t('loadedInputDir') + ': ' + result.path)
-    } else if (result.type === 'pdf') {
-      workMode.value = 'pdf'
-      pdfForm.pdf_path = result.path
-      ElMessage.success(t('loadedPdfFile') + ': ' + result.path)
-    } else if (result.type === 'image') {
-      workMode.value = 'dir'
-      form.source_dir = result.parent_dir
-      form.target_dir = result.suggested_target_dir
-      ElMessage.success(t('loadedImageParentDir') + ': ' + result.parent_dir)
-    }
+    applyDroppedResult(result)
   } catch (err) {
     showError(err)
   }
@@ -841,16 +913,26 @@ async function applyDroppedPath(path) {
 async function selectDirectory(field) {
   directoryLoading.value = field
   try {
-    const result = await callApi('choose_directory', form[field] || '')
+    let initialDir = ''
+    if (field === 'pdf_output_dir') {
+      initialDir = pdfForm.output_dir || (pdfForm.pdf_path ? pdfForm.pdf_path.replace(/[\\/][^\\/]+$/, '') : '')
+    } else {
+      initialDir = form[field] || ''
+    }
+    const result = await callApi('choose_directory', initialDir)
     directoryLoading.value = ''
     if (!result.ok) {
       showError(result)
       return
     }
     if (!result.path) return
-    form[field] = result.path
-    if (field === 'source_dir') {
-      form.target_dir = result.path.replace(/[\\/]+$/, '') + '\\output'
+    if (field === 'pdf_output_dir') {
+      pdfForm.output_dir = result.path
+    } else {
+      form[field] = result.path
+      if (field === 'source_dir') {
+        form.target_dir = result.path.replace(/[\\/]+$/, '') + '\\output'
+      }
     }
   } catch (err) {
     directoryLoading.value = ''
@@ -886,6 +968,7 @@ async function startTask() {
     form.non_bin_format = form.size_opt_mode === 'original' ? 'keep' : 'jpg80'
     const pdfSettings = Object.assign({}, form, {
       pdf_path: pdfForm.pdf_path,
+      output_dir: (pdfForm.output_dir || '').trim(),
       no_convert_pdf: pdfForm.no_convert_pdf,
       lang: currentLang.value
     })
@@ -1116,8 +1199,9 @@ async function pollEvents() {
 }
 
 onMounted(async () => {
-  // 挂载全局供 pywebview COM 拖拽直接调用的 hook
+  // 挂载全局供 pywebview 原生拖拽（WebView2 与 COM）调用的 hooks
   window.c2bwDropPath = (p) => applyDroppedPath(p)
+  window.__onNativeDropResolved = (result) => applyDroppedResult(result)
 
   await initBridge()
   checkForUpdates()
@@ -1138,5 +1222,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  delete window.c2bwDropPath
+  delete window.__onNativeDropResolved
 })
 </script>

@@ -16,15 +16,59 @@ permissions:
   contents: write
 
 env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  APP_VERSION: 'v3.7'
+  DEFAULT_APP_VERSION: 'v3.9'
 
 jobs:
+  build-frontend:
+    name: Build Vue 3 Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build WebUI
+        run: |
+          cd frontend
+          npm ci || npm install
+          npm run build
+
+      - name: Upload built WebUI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: webui-dist
+          path: webui/
+          if-no-files-found: error
+
   build-windows:
     name: Windows x64 (Win10/11 & Win7)
+    needs: [build-frontend]
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download built WebUI
+        uses: actions/download-artifact@v4
+        with:
+          name: webui-dist
+          path: webui
+
+      - name: Determine Version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          if ($tag -match '^v\d') {
+            $ver = $tag
+          } else {
+            $ver = "${{ env.DEFAULT_APP_VERSION }}"
+          }
+          Write-Host "Resolved APP_VERSION: $ver"
+          "APP_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       # 1. 构建 Windows 10 / 11 标准版 (Python 3.11)
       - name: Setup Python 3.11 for Windows 10/11
@@ -37,11 +81,16 @@ jobs:
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pyinstaller pywin32
+          python -m pip install -r requirements.txt pyinstaller pythonnet clr_loader pywin32
           python -m PyInstaller --noconfirm --clean c2bw.spec
+          python finalize_build.py win11
           $builtExe = Get-ChildItem dist -Filter "智能图像预处理工具 v*.exe" | Where-Object { $_.Name -notmatch "_Win7" } | Select-Object -First 1
+          if (-not $builtExe) {
+            throw "Windows 10/11 build executable not found in dist/"
+          }
           Copy-Item $builtExe.FullName "dist/c2bw-windows-x64.exe" -Force
-          Copy-Item $builtExe.FullName "dist/智能图像预处理工具_${{ env.APP_VERSION }}_Windows.exe" -Force
+          Copy-Item $builtExe.FullName "dist/智能图像预处理工具_${{ env.APP_VERSION }}.exe" -Force
+          Copy-Item $builtExe.FullName "dist/智能图像预处理工具 v3.9.exe" -Force
 
       # 2. 构建 Windows 7 专用独立版 (Python 3.8 + pythonnet)
       - name: Setup Python 3.8 for Windows 7
@@ -58,13 +107,20 @@ jobs:
           if (Test-Path $dll) { Copy-Item $dll . -Force }
           python -m PyInstaller --noconfirm --clean c2bw_win7.spec
           if (Test-Path "Python.Runtime.dll") { Remove-Item "Python.Runtime.dll" -Force }
+          python finalize_build.py win7
           $builtWin7Exe = Get-ChildItem dist -Filter "智能图像预处理工具 v*_Win7.exe" | Select-Object -First 1
+          if (-not $builtWin7Exe) {
+            throw "Windows 7 build executable not found in dist/"
+          }
           Copy-Item $builtWin7Exe.FullName "dist/c2bw-windows7-x64.exe" -Force
-          Copy-Item $builtWin7Exe.FullName "dist/智能图像预处理工具_${{ env.APP_VERSION }}_Windows7.exe" -Force
+          Copy-Item $builtWin7Exe.FullName "dist/智能图像预处理工具_${{ env.APP_VERSION }}_Win7.exe" -Force
+          Copy-Item $builtWin7Exe.FullName "dist/智能图像预处理工具 v3.9_Win7.exe" -Force
 
       - name: Generate Windows Checksums
         shell: pwsh
         run: |
+          Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 v3.9.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 v3.9.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_v3.9.sha256"
+          Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 v3.9_Win7.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 v3.9_Win7.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_v3.9_Win7.sha256"
           Get-FileHash -Algorithm SHA256 "dist/c2bw-windows-x64.exe" | ForEach-Object { "$($_.Hash.ToLower())  c2bw-windows-x64.exe" } | Out-File -Encoding utf8 "dist/c2bw-windows-x64.sha256"
           Get-FileHash -Algorithm SHA256 "dist/c2bw-windows7-x64.exe" | ForEach-Object { "$($_.Hash.ToLower())  c2bw-windows7-x64.exe" } | Out-File -Encoding utf8 "dist/c2bw-windows7-x64.sha256"
 
@@ -72,16 +128,18 @@ jobs:
         with:
           name: windows-binaries
           path: |
+            dist/智能图像预处理工具 v3.9.exe
+            dist/智能图像预处理工具 v3.9_Win7.exe
+            dist/智能图像预处理工具_${{ env.APP_VERSION }}.exe
+            dist/智能图像预处理工具_${{ env.APP_VERSION }}_Win7.exe
             dist/c2bw-windows-x64.exe
-            dist/智能图像预处理工具_${{ env.APP_VERSION }}_Windows.exe
-            dist/c2bw-windows-x64.sha256
             dist/c2bw-windows7-x64.exe
-            dist/智能图像预处理工具_${{ env.APP_VERSION }}_Windows7.exe
-            dist/c2bw-windows7-x64.sha256
+            dist/*.sha256
           if-no-files-found: error
 
   build-macos:
     name: macOS ${{ matrix.arch }} (${{ matrix.name }})
+    needs: [build-frontend]
     strategy:
       fail-fast: false
       matrix:
@@ -95,6 +153,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download built WebUI
+        uses: actions/download-artifact@v4
+        with:
+          name: webui-dist
+          path: webui
+
+      - name: Determine Version
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" =~ ^v[0-9] ]]; then
+            VER="$TAG"
+          else
+            VER="${{ env.DEFAULT_APP_VERSION }}"
+          fi
+          echo "APP_VERSION=$VER" >> $GITHUB_ENV
 
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
@@ -135,9 +209,26 @@ jobs:
 
   build-linux:
     name: Linux x64
+    needs: [build-frontend]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+
+      - name: Download built WebUI
+        uses: actions/download-artifact@v4
+        with:
+          name: webui-dist
+          path: webui
+
+      - name: Determine Version
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" =~ ^v[0-9] ]]; then
+            VER="$TAG"
+          else
+            VER="${{ env.DEFAULT_APP_VERSION }}"
+          fi
+          echo "APP_VERSION=$VER" >> $GITHUB_ENV
 
       - name: Install system dependencies (WebKitGTK & PyGObject)
         run: |
@@ -207,11 +298,11 @@ jobs:
         shell: bash
         run: |
           mkdir -p release-dist
-          # 复制所有二进制与单独校验文件
-          find release-artifacts -type f \( -name "*.exe" -o -name "c2bw-*" -o -name "智能图像预处理工具_*" \) -exec cp {} release-dist/ \;
-          # 生成源码 zip 包
+          # 收集所有独立可执行文件及单独校验清单
+          find release-artifacts -type f \( -name "*.exe" -o -name "c2bw-*" -o -name "智能图像预处理工具*" \) -exec cp {} release-dist/ \;
+          # 生成源码 zip 归档
           git archive --format=zip --output=release-dist/c2bw-source.zip HEAD
-          # 汇总计算完整的 SHA256SUMS 清单
+          # 汇总计算全局 SHA256SUMS 清单
           cd release-dist
           sha256sum * > SHA256SUMS.txt
           ls -lh

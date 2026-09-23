@@ -66,8 +66,204 @@ from c2bw.service import (
 )
 
 
+def _resolve_from_everything_windows(name):
+    """从当前打开的 Everything 窗口状态栏、标题及控件中提取选中的绝对物理路径"""
+    if sys.platform != 'win32' or not name:
+        return None
+    try:
+        import ctypes
+        import re
+        user32 = ctypes.windll.user32
+
+        try:
+            h_def = user32.OpenDesktopW("default", 0, False, 0x01FF)
+            if h_def:
+                user32.SetThreadDesktop(h_def)
+        except Exception:
+            pass
+
+        name_lower = name.lower()
+        windows = []
+
+        # 1. 直接通过已知类名查找 Everything 窗口
+        for cls_name in ('EVERYTHING', 'EVERYTHING_TASKBAR_NOTIFICATION'):
+            h = user32.FindWindowW(cls_name, None)
+            if h and h not in windows:
+                windows.append(h)
+
+        # 2. 枚举所有顶层窗口，寻找类名包含 EVERYTHING 的窗口
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        def enum_cb(h, _):
+            cls = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(h, cls, 256)
+            if 'EVERYTHING' in cls.value.upper():
+                if h not in windows:
+                    windows.append(h)
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+
+        # 3. 从找到的窗口及其子控件（尤其是状态栏 msctls_statusbar32）中读取文本
+        WM_GETTEXT = 0x000D
+        SB_GETPARTS = 0x0406
+        SB_GETTEXTW = 0x040D
+
+        extracted_texts = []
+
+        for h in windows:
+            title_buf = ctypes.create_unicode_buffer(1024)
+            user32.GetWindowTextW(h, title_buf, 1024)
+            if title_buf.value:
+                extracted_texts.append(title_buf.value)
+
+            child_windows = []
+            def child_cb(ch, _):
+                cls = ctypes.create_unicode_buffer(256)
+                user32.GetClassNameW(ch, cls, 256)
+                cls_lower = cls.value.lower()
+                if cls_lower in ('msctls_statusbar32', 'edit', 'combobox'):
+                    child_windows.append((ch, cls_lower))
+                return True
+
+            user32.EnumChildWindows(h, WNDENUMPROC(child_cb), 0)
+
+            for ch, cls_lower in child_windows:
+                buf = ctypes.create_unicode_buffer(4096)
+                user32.SendMessageW(ch, WM_GETTEXT, 4096, buf)
+                if buf.value:
+                    extracted_texts.append(buf.value)
+
+                if cls_lower == 'msctls_statusbar32':
+                    try:
+                        num_parts = user32.SendMessageW(ch, SB_GETPARTS, 0, 0)
+                        for i in range(min(num_parts, 16)):
+                            pbuf = ctypes.create_unicode_buffer(2048)
+                            user32.SendMessageW(ch, SB_GETTEXTW, i, pbuf)
+                            if pbuf.value:
+                                extracted_texts.append(pbuf.value)
+                    except Exception:
+                        pass
+
+        # 4. 从提取到的所有文本中解析路径并验证
+        for text in extracted_texts:
+            if not text:
+                continue
+            m1 = re.findall(r'(?:路径|Path)[:：]\s*([a-zA-Z]:\\[^\r\n,，;]+|\\\\[^\r\n,，;]+)', text, re.I)
+            m2 = re.findall(r'([a-zA-Z]:\\[^\r\n,，;<>|*?"\t]+|\\\\[^\r\n,，;<>|*?"\t]+)', text)
+            raw_candidates = m1 + m2
+            for raw in raw_candidates:
+                cand = raw.strip().strip('"').strip("'")
+                if not cand:
+                    continue
+
+                if os.path.exists(cand):
+                    if os.path.basename(cand).lower() == name_lower:
+                        return os.path.abspath(cand)
+                    if os.path.isdir(cand):
+                        sub_item = os.path.join(cand, name)
+                        if os.path.exists(sub_item):
+                            return os.path.abspath(sub_item)
+
+                sub_item = os.path.join(cand, name)
+                if os.path.exists(sub_item):
+                    return os.path.abspath(sub_item)
+
+                cand_dir = os.path.dirname(cand)
+                if cand_dir and os.path.isdir(cand_dir):
+                    sub_item = os.path.join(cand_dir, name)
+                    if os.path.exists(sub_item):
+                        return os.path.abspath(sub_item)
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_from_other_file_managers(name):
+    """从可见窗口标题栏中反查第三方文件管理器（Total Commander、XYplorer、压缩软件等）当前打开的路径"""
+    if sys.platform != 'win32' or not name:
+        return None
+    try:
+        import ctypes
+        import re
+        user32 = ctypes.windll.user32
+        name_lower = name.lower()
+        windows = []
+
+        WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
+        def enum_cb(h, _):
+            if user32.IsWindowVisible(h):
+                windows.append(h)
+            return True
+
+        user32.EnumWindows(WNDENUMPROC(enum_cb), 0)
+
+        for h in windows[:30]:
+            title_buf = ctypes.create_unicode_buffer(512)
+            user32.GetWindowTextW(h, title_buf, 512)
+            title = title_buf.value
+            if not title:
+                continue
+
+            matches = re.findall(r'([a-zA-Z]:\\[^\r\n,，;<>|*?"\t]+|\\\\[^\r\n,，;<>|*?"\t]+)', title)
+            for raw in matches:
+                cand = raw.strip().strip('"').strip("'")
+                if not cand:
+                    continue
+                if os.path.exists(cand):
+                    if os.path.basename(cand).lower() == name_lower:
+                        return os.path.abspath(cand)
+                    if os.path.isdir(cand):
+                        sub_item = os.path.join(cand, name)
+                        if os.path.exists(sub_item):
+                            return os.path.abspath(sub_item)
+                sub_item = os.path.join(cand, name)
+                if os.path.exists(sub_item):
+                    return os.path.abspath(sub_item)
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_from_recent_items(name):
+    """从 Windows Recent 最近访问项的快捷方式中反查目标绝对路径"""
+    if sys.platform != 'win32' or not name:
+        return None
+    try:
+        name_lower = name.lower()
+        recent_dir = os.path.join(os.environ.get('APPDATA', ''), 'Microsoft', 'Windows', 'Recent')
+        if not os.path.isdir(recent_dir):
+            return None
+
+        import win32com.client
+        shell = None
+
+        for item in os.listdir(recent_dir):
+            if not item.lower().endswith('.lnk'):
+                continue
+            base = item[:-4]
+            if base.lower() == name_lower or base.lower().startswith(name_lower):
+                lnk_path = os.path.join(recent_dir, item)
+                try:
+                    if shell is None:
+                        shell = win32com.client.Dispatch("WScript.Shell")
+                    shortcut = shell.CreateShortCut(lnk_path)
+                    target = shortcut.TargetPath
+                    if target and os.path.exists(target):
+                        if os.path.basename(target).lower() == name_lower:
+                            return os.path.abspath(target)
+                        if os.path.isdir(target):
+                            sub = os.path.join(target, name)
+                            if os.path.exists(sub):
+                                return os.path.abspath(sub)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return None
+
+
 def _resolve_system_dropped_path(raw_input):
-    """若仅拖入文件名或受沙箱保护的相对标识，尝试在系统资源管理器、桌面或常用目录中解析绝对路径。"""
+    """若仅拖入文件名或受沙箱保护的相对标识，尝试在系统资源管理器、Everything窗口与历史、桌面或常用目录中解析绝对路径。"""
     if not raw_input:
         return ''
     raw_input = str(raw_input).strip().strip('"').strip("'")
@@ -76,10 +272,25 @@ def _resolve_system_dropped_path(raw_input):
     if os.path.exists(raw_input):
         return os.path.abspath(raw_input)
 
+    # 尝试解析 file:/// 格式 URL
+    if raw_input.lower().startswith('file:///'):
+        try:
+            from urllib.parse import urlsplit, unquote
+            from urllib.request import url2pathname
+            parsed = urlsplit(raw_input)
+            if parsed.netloc:
+                local_path = f"\\\\{parsed.netloc}{unquote(parsed.path)}"
+            else:
+                local_path = url2pathname(unquote(parsed.path))
+            if os.path.exists(local_path):
+                return os.path.abspath(local_path)
+        except Exception:
+            pass
+
     name = os.path.basename(raw_input) if ('/' in raw_input or '\\' in raw_input) else raw_input
     name_lower = name.lower()
 
-    # 1. Windows 环境：遍历系统资源管理器窗口，寻找选中项或同名文件/目录
+    # 1. Windows 原生资源管理器：枚举打开窗口，反查选中项或当前目录
     if sys.platform == 'win32':
         com_initialized = False
         try:
@@ -125,7 +336,48 @@ def _resolve_system_dropped_path(raw_input):
                 except Exception:
                     pass
 
-    # 2. 检查常见系统目录：桌面、下载、文档、公用桌面、程序当前工作目录
+    # 2. Everything 实时窗口探测：从当前打开的 Everything 窗口状态栏、标题栏与输入框提取真实路径
+    if sys.platform == 'win32':
+        res = _resolve_from_everything_windows(name)
+        if res:
+            return res
+
+    # 3. 其它第三方文件管理器或窗口标题栏路径反查
+    if sys.platform == 'win32':
+        res = _resolve_from_other_file_managers(name)
+        if res:
+            return res
+
+    # 4. Windows Recent 最近访问项快捷方式反查
+    if sys.platform == 'win32':
+        res = _resolve_from_recent_items(name)
+        if res:
+            return res
+
+    # 5. 检查 Everything 运行/访问历史记录（Run History.csv）
+    if sys.platform == 'win32':
+        for hist_base in (
+            os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'Everything'),
+            os.path.join(os.path.expanduser('~'), 'AppData', 'Local', 'Everything'),
+            r'C:\Program Files\Everything',
+        ):
+            try:
+                hist_file = os.path.join(hist_base, 'Run History.csv')
+                if os.path.isfile(hist_file):
+                    with open(hist_file, 'r', encoding='utf-8', errors='ignore') as hf:
+                        for line in reversed(hf.readlines()):
+                            line = line.strip()
+                            if not line or line.startswith('Filename,'):
+                                continue
+                            parts = line.split('","')
+                            if parts:
+                                candidate_path = parts[0].strip().strip('"')
+                                if os.path.basename(candidate_path).lower() == name_lower and os.path.exists(candidate_path):
+                                    return os.path.abspath(candidate_path)
+            except Exception:
+                pass
+
+    # 6. 检查常见系统目录：桌面、下载、文档、公用桌面、程序当前工作目录
     candidates = []
     user_home = os.path.expanduser('~')
     candidates.append(os.path.join(user_home, 'Desktop'))
@@ -400,7 +652,7 @@ class ImageProcessorApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("智能图像预处理工具 v3.8")
+        self.root.title("智能图像预处理工具 v3.9")
         # 在较矮的屏幕上留出系统任务栏空间，其他内容通过滚动条访问。
         window_height = min(820, max(480, self.root.winfo_screenheight() - 100))
         self.root.geometry(f"700x{window_height}")
@@ -419,6 +671,7 @@ class ImageProcessorApp:
         # === 变量定义 ===
         self.work_mode = tk.StringVar(value="dir")
         self.pdf_file_path = tk.StringVar()
+        self.pdf_output_dir = tk.StringVar()
         self.pdf_target_preview = tk.StringVar()
         self.source_dir = tk.StringVar()
         self.target_dir = tk.StringVar()
@@ -528,16 +781,20 @@ class ImageProcessorApp:
         ttk.Entry(self.pdf_frame, textvariable=self.pdf_file_path, width=44).grid(row=0, column=1, pady=5, padx=8)
         ttk.Button(self.pdf_frame, text="浏览...", command=self.select_pdf_file_for_mode, width=7).grid(row=0, column=2, pady=5, sticky=tk.W)
 
-        ttk.Label(self.pdf_frame, text="生成目录:").grid(row=1, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(self.pdf_frame, textvariable=self.pdf_target_preview, width=44, state="readonly").grid(row=1, column=1, pady=5, padx=8)
-        ttk.Label(self.pdf_frame, text="(同名+任务后缀)").grid(row=1, column=2, sticky=tk.W, pady=5)
+        ttk.Label(self.pdf_frame, text="输出目录:").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.pdf_frame, textvariable=self.pdf_output_dir, width=44).grid(row=1, column=1, pady=5, padx=8)
+        ttk.Button(self.pdf_frame, text="浏览...", command=self.select_pdf_output_dir, width=7).grid(row=1, column=2, pady=5, sticky=tk.W)
+
+        ttk.Label(self.pdf_frame, text="生成目录:").grid(row=2, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.pdf_frame, textvariable=self.pdf_target_preview, width=44, state="readonly").grid(row=2, column=1, pady=5, padx=8)
+        ttk.Label(self.pdf_frame, text="(同名+任务后缀)").grid(row=2, column=2, sticky=tk.W, pady=5)
 
         ttk.Checkbutton(
             self.pdf_frame,
             text="不转换为PDF (仅保留处理后的图片文件)",
             variable=self.pdf_no_convert,
             command=self._update_pdf_hint,
-        ).grid(row=2, column=1, sticky=tk.W, pady=3, padx=5)
+        ).grid(row=3, column=1, sticky=tk.W, pady=3, padx=5)
 
         self.pdf_hint_label = ttk.Label(
             self.pdf_frame,
@@ -545,14 +802,14 @@ class ImageProcessorApp:
             font=('Microsoft YaHei', 9),
             foreground="#0284c7"
         )
-        self.pdf_hint_label.grid(row=3, column=1, columnspan=2, sticky=tk.W, pady=3)
+        self.pdf_hint_label.grid(row=4, column=1, columnspan=2, sticky=tk.W, pady=3)
 
         ttk.Label(
             self.pdf_frame,
             text="注：仅支持图片类型的 PDF 文件处理（扫描件、古籍、插画等图片打包生成的 PDF）",
             font=('Microsoft YaHei', 8),
             foreground="#d97706"
-        ).grid(row=4, column=1, columnspan=2, sticky=tk.W, pady=(1, 3))
+        ).grid(row=5, column=1, columnspan=2, sticky=tk.W, pady=(1, 3))
 
         self.dir_frame.pack(fill=tk.X)
 
@@ -787,13 +1044,28 @@ class ImageProcessorApp:
         if not path:
             self.pdf_target_preview.set("")
             return
-        pdf_dir = os.path.dirname(os.path.abspath(path))
+        custom_out = self.pdf_output_dir.get().strip()
+        if custom_out:
+            base_dir = os.path.abspath(custom_out)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(path))
         pdf_name = os.path.splitext(os.path.basename(path))[0]
         suffix = get_task_suffix(self.enable_crop.get(), self.enable_binarize.get(), size_opt_mode=self.size_opt_mode.get())
         if not suffix:
-            self.pdf_target_preview.set(os.path.join(pdf_dir, pdf_name))
+            self.pdf_target_preview.set(os.path.join(base_dir, pdf_name))
         else:
-            self.pdf_target_preview.set(os.path.join(pdf_dir, f"{pdf_name}{suffix}"))
+            self.pdf_target_preview.set(os.path.join(base_dir, f"{pdf_name}{suffix}"))
+
+    def select_pdf_output_dir(self):
+        initial = self.pdf_output_dir.get().strip()
+        if not initial:
+            p = self.pdf_file_path.get().strip()
+            if p:
+                initial = os.path.dirname(os.path.abspath(p))
+        folder_selected = filedialog.askdirectory(initialdir=initial or None)
+        if folder_selected:
+            self.pdf_output_dir.set(folder_selected)
+            self._update_pdf_target_preview()
 
     def _update_pdf_hint(self, *args):
         self._update_pdf_target_preview()
@@ -1267,7 +1539,17 @@ class ImageProcessorApp:
                 messagebox.showwarning("PDF 文件无效", "请先选择一个有效的待处理 PDF 文件。")
                 return
 
-            pdf_dir = os.path.dirname(pdf_path)
+            custom_out = self.pdf_output_dir.get().strip()
+            if custom_out:
+                base_dir = os.path.abspath(custom_out)
+                try:
+                    os.makedirs(base_dir, exist_ok=True)
+                except Exception as e:
+                    messagebox.showwarning("输出目录无效", f"指定的输出目录无效或无法创建：\n{base_dir}\n{str(e)}")
+                    return
+            else:
+                base_dir = os.path.dirname(pdf_path)
+
             pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
             enable_crop = self.enable_crop.get()
             enable_binarize = self.enable_binarize.get()
@@ -1275,7 +1557,7 @@ class ImageProcessorApp:
 
             size_opt_mode = self.size_opt_mode.get()
             suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
-            task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
+            task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
             if no_convert_pdf:
                 final_pdf_path = ''
             else:
@@ -1316,6 +1598,7 @@ class ImageProcessorApp:
             settings = {
                 'work_mode': 'pdf',
                 'pdf_path': os.path.abspath(pdf_path),
+                'output_dir': os.path.abspath(base_dir),
                 'source_dir': os.path.abspath(task_dir),
                 'target_dir': os.path.abspath(os.path.join(task_dir, 'output')),
                 'final_pdf_path': final_pdf_path,

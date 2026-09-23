@@ -48,10 +48,10 @@ from c2bw.core import (
 
 
 APP_TITLES = {
-    'zh-CN': '智能图像预处理工具 v3.8',
-    'zh-TW': '智能圖像預處理工具 v3.8',
-    'ja': 'スマート画像前処理ツール v3.8',
-    'en': 'Smart Image Preprocessor v3.8',
+    'zh-CN': '智能图像预处理工具 v3.9',
+    'zh-TW': '智能圖像預處理工具 v3.9',
+    'ja': 'スマート画像前処理ツール v3.9',
+    'en': 'Smart Image Preprocessor v3.9',
 }
 
 QUIT_CONFIRMATIONS = {
@@ -163,15 +163,15 @@ class ImageProcessorService:
         try:
             request = urllib.request.Request(
                 self.UPDATE_INFO_URL,
-                headers={'User-Agent': 'SHUGE-C2BW/3.8'},
+                headers={'User-Agent': 'SHUGE-C2BW/3.9'},
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 data = json.loads(response.read().decode('utf-8-sig'))
             if not isinstance(data, dict) or not data.get('version'):
                 raise ValueError('服务器返回的更新信息格式无效。')
-            return {'ok': True, 'current_version': '3.8.0.0', 'update': data, 'source': 'server'}
+            return {'ok': True, 'current_version': '3.9.0.0', 'update': data, 'source': 'server'}
         except Exception:
-            return {'ok': False, 'current_version': '3.8.0.0'}
+            return {'ok': False, 'current_version': '3.9.0.0'}
 
     def open_download_url(self, url):
         try:
@@ -294,10 +294,19 @@ class ImageProcessorService:
             custom_scale = int(raw_settings.get('custom_scale', 80))
             custom_quality = int(raw_settings.get('custom_quality', 80))
 
-            pdf_dir = os.path.dirname(pdf_path)
+            custom_output_dir = str(raw_settings.get('output_dir', '') or '').strip()
+            if custom_output_dir:
+                base_dir = os.path.abspath(custom_output_dir)
+                try:
+                    os.makedirs(base_dir, exist_ok=True)
+                except Exception as e:
+                    return None, f"指定的输出目录无效或无法创建：{base_dir} ({str(e)})"
+            else:
+                base_dir = os.path.dirname(pdf_path)
+
             pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
             suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
-            task_dir = os.path.join(pdf_dir, f"{pdf_name}{suffix}")
+            task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
             if no_convert_pdf:
                 final_pdf_path = ''
             else:
@@ -306,6 +315,7 @@ class ImageProcessorService:
             settings = {
                 'work_mode': 'pdf',
                 'pdf_path': os.path.abspath(pdf_path),
+                'output_dir': os.path.abspath(base_dir),
                 'source_dir': os.path.abspath(task_dir),
                 'target_dir': os.path.abspath(os.path.join(task_dir, 'output')),
                 'final_pdf_path': final_pdf_path,

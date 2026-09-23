@@ -12,6 +12,7 @@ import struct
 import tempfile
 import threading
 import locale
+import math
 from PIL import Image, JpegImagePlugin, PdfImagePlugin, Jpeg2KImagePlugin, TiffImagePlugin, ImageOps
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
@@ -59,6 +60,191 @@ def _resolve_pdf_xobject(page, img_id):
         except Exception:
             return None
     return curr
+
+
+def _get_page_rotation(page):
+    """获取页面的视觉顺时针旋转角度（0, 90, 180, 270），自动沿继承树向上查找 /Rotate 属性。"""
+    p = page
+    while p:
+        if '/Rotate' in p:
+            r = p.get('/Rotate')
+            if hasattr(r, 'get_object'):
+                r = r.get_object()
+            try:
+                return int(r) % 360
+            except Exception:
+                return 0
+        p = p.get('/Parent')
+        if hasattr(p, 'get_object'):
+            p = p.get_object()
+    return 0
+
+
+def _mult_matrix(m, n):
+    """PDF 2D 仿射变换矩阵乘法 [a, b, c, d, e, f]。"""
+    return [
+        m[0] * n[0] + m[1] * n[2],
+        m[0] * n[1] + m[1] * n[3],
+        m[2] * n[0] + m[3] * n[2],
+        m[2] * n[1] + m[3] * n[3],
+        m[4] * n[0] + m[5] * n[2] + n[4],
+        m[4] * n[1] + m[5] * n[3] + n[5],
+    ]
+
+
+def _get_page_image_transforms(page):
+    """
+    解析页面内容流，获取每个绘制的 XObject 图片对应的最终变换矩阵 (CTM)。
+    返回字典：{ image_name: [a, b, c, d, e, f], ... }
+    """
+    transforms = {}
+    try:
+        cs = page.get_contents()
+    except Exception:
+        cs = None
+
+    if cs is None:
+        return transforms
+
+    try:
+        cur_cm = [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+        stack = []
+        for operands, operator in cs.operations:
+            if operator == b'q':
+                stack.append(list(cur_cm))
+            elif operator == b'Q':
+                cur_cm = stack.pop() if stack else [1.0, 0.0, 0.0, 1.0, 0.0, 0.0]
+            elif operator == b'cm':
+                try:
+                    op_cm = [float(x) for x in operands[:6]]
+                    cur_cm = _mult_matrix(op_cm, cur_cm)
+                except Exception:
+                    pass
+            elif operator == b'Do':
+                if operands:
+                    name_raw = str(operands[0])
+                    transforms[name_raw] = list(cur_cm)
+                    if name_raw.startswith('/'):
+                        transforms[name_raw[1:]] = list(cur_cm)
+                    else:
+                        transforms['/' + name_raw] = list(cur_cm)
+    except Exception:
+        pass
+
+    return transforms
+
+
+def _calculate_image_rotation_and_flip(cm, page_rot):
+    """
+    结合内容流变换矩阵 (CTM) 与页面旋转 (/Rotate)，计算图片的顺时针旋转角度与镜像翻转状态。
+    返回: (total_rot_cw, flipped_h)
+    """
+    ctm_rot_cw = 0
+    flipped_h = False
+    if cm and len(cm) >= 4:
+        a, b, c, d = cm[0], cm[1], cm[2], cm[3]
+        det = a * d - b * c
+        if det < 0:
+            flipped_h = True
+            a, b = -a, -b
+        if abs(a) > 1e-6 or abs(b) > 1e-6:
+            deg = math.degrees(math.atan2(b, a))
+            ctm_rot_cw = int(round(-deg / 90.0) * 90) % 360
+
+    total_rot_cw = (ctm_rot_cw + int(page_rot or 0)) % 360
+    return total_rot_cw, flipped_h
+
+
+def _apply_image_rotation(data, ext, total_rot_cw, flipped_h=False):
+    """
+    对提取出的原始图片数据应用指定的顺时针旋转与水平翻转，并以最高保真度保存。
+    若无旋转与翻转，直接返回原始字节流，零重编码。
+    """
+    if not data or (total_rot_cw == 0 and not flipped_h):
+        return data
+
+    rot_op_map = {
+        90: Image.ROTATE_270,   # Pillow 中 ROTATE_270 对应顺时针 90 度
+        180: Image.ROTATE_180,  # 顺时针 180 度
+        270: Image.ROTATE_90,   # Pillow 中 ROTATE_90 对应顺时针 270 度（逆时针 90 度）
+    }
+    rot_op = rot_op_map.get(total_rot_cw)
+
+    try:
+        bio = io.BytesIO(data)
+        with Image.open(bio) as im:
+            im_transformed = im
+            if flipped_h:
+                im_transformed = im_transformed.transpose(Image.FLIP_LEFT_RIGHT)
+            if rot_op is not None:
+                im_transformed = im_transformed.transpose(rot_op)
+
+            out_bio = io.BytesIO()
+            fmt = (im.format or '').upper()
+
+            if fmt == 'TIFF' or ext in ('.tif', '.tiff'):
+                # 针对 1 位二值古籍图片，严格使用标准 CCITT Group 4 无损压缩
+                if im.mode == '1' or getattr(im, 'tag_v2', {}).get(259) == 4:
+                    info = TiffImagePlugin.ImageFileDirectory_v2()
+                    info[278] = im_transformed.height
+                    info[262] = 1  # BlackIsZero
+                    im_transformed.save(out_bio, format='TIFF', compression='group4', tiffinfo=info)
+                    return _normalize_extracted_tiff(out_bio.getvalue())
+                else:
+                    im_transformed.save(out_bio, format='TIFF', compression='tiff_deflate')
+                    return out_bio.getvalue()
+
+            elif fmt == 'JPEG' or ext in ('.jpg', '.jpeg'):
+                im_transformed.format = 'JPEG'
+                save_kwargs = {'format': 'JPEG'}
+                if 'icc_profile' in im.info:
+                    save_kwargs['icc_profile'] = im.info['icc_profile']
+                if 'dpi' in im.info:
+                    save_kwargs['dpi'] = im.info['dpi']
+
+                # 重置 EXIF Orientation 为 1（正常），防止看图软件发生二次旋转
+                try:
+                    exif = im.getexif()
+                    if exif:
+                        exif[0x0112] = 1
+                        save_kwargs['exif'] = exif
+                except Exception:
+                    pass
+
+                # 优先复用原图 DCT 量化表与色度抽样，实现与原图一致的保真度
+                try:
+                    save_kwargs['quality'] = 'keep'
+                    save_kwargs['subsampling'] = 'keep'
+                    im_transformed.save(out_bio, **save_kwargs)
+                    return out_bio.getvalue()
+                except Exception:
+                    out_bio = io.BytesIO()
+                    save_kwargs.pop('quality', None)
+                    save_kwargs.pop('subsampling', None)
+                    save_kwargs['quality'] = 95
+                    im_transformed.save(out_bio, **save_kwargs)
+                    return out_bio.getvalue()
+
+            elif fmt == 'PNG' or ext == '.png':
+                im_transformed.save(out_bio, format='PNG')
+                return out_bio.getvalue()
+
+            elif fmt in ('JPEG2000', 'JP2') or ext == '.jp2':
+                im_transformed.save(out_bio, format='JPEG2000', irreversible=False)
+                return out_bio.getvalue()
+
+            elif fmt == 'BMP' or ext == '.bmp':
+                im_transformed.save(out_bio, format='BMP')
+                return out_bio.getvalue()
+
+            else:
+                save_fmt = fmt if fmt else 'PNG'
+                im_transformed.save(out_bio, format=save_fmt)
+                return out_bio.getvalue()
+
+    except Exception:
+        # 若几何旋转异常，安全兜底返回原始数据流
+        return data
 
 
 def _normalize_extracted_tiff(data):
@@ -533,6 +719,9 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
                 if filtered_keys:
                     img_keys = filtered_keys
 
+        page_rot = _get_page_rotation(page)
+        image_transforms = _get_page_image_transforms(page)
+
         page_extracted = []
         for img_id in img_keys:
             if cancel_event and cancel_event.is_set():
@@ -567,6 +756,25 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
 
             if ext == '.tif' and data:
                 data = _normalize_extracted_tiff(data)
+
+            # 计算该图片在 PDF 中的视觉旋转与镜像翻转状态
+            cm = None
+            if isinstance(img_id, (tuple, list)):
+                for candidate in (img_id, str(img_id), img_id[-1], str(img_id[-1])):
+                    if candidate in image_transforms:
+                        cm = image_transforms[candidate]
+                        break
+            else:
+                cand = str(img_id)
+                cm = (
+                    image_transforms.get(cand)
+                    or image_transforms.get(cand.lstrip('/'))
+                    or image_transforms.get('/' + cand)
+                )
+
+            total_rot_cw, flipped_h = _calculate_image_rotation_and_flip(cm, page_rot)
+            if (total_rot_cw != 0 or flipped_h) and data:
+                data = _apply_image_rotation(data, ext, total_rot_cw, flipped_h)
 
             page_extracted.append((ext, data))
 

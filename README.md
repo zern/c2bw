@@ -6,7 +6,7 @@
 
 `c2bw`（Color to Black & White）是一款高效、专业的批量图像与扫描文档预处理工具，主要用于书籍扫描、文献归档中的图片双页裁切、黑白二值化、无损原图提取以及高清紧凑 PDF 汇总。
 
-当前版本：**v3.8**
+当前版本：**v3.9**
 
 > 📖 **[点击查看：单文件版本详细用户操作使用说明 (简体中文)](使用说明.md) | [點擊查看：單文件版本詳細用戶操作使用說明 (繁體中文)](使用說明.md)**
 
@@ -120,12 +120,8 @@ python c2bw.py
 build_win11.bat
 ```
 
-脚本将自动执行前端 Vite 打包、准备运行时依赖、调用 PyInstaller 封装并在 `dist\` 生成以下文件：
-- `dist\智能图像预处理工具 v3.8.exe`
-- `dist\智能图像预处理工具 v3.8_Win11.exe`
-- `dist\c2bw_v3.8-x64.exe`
-- `dist\c2bw_win11.exe`
-- `dist\c2bw-windows-x64.exe`
+脚本将自动执行前端 Vite 打包、准备运行时依赖、调用 PyInstaller 封装并在 `dist\` 生成：
+- `dist\智能图像预处理工具 v3.9.exe`
 
 ### 2. Windows 7 专用独立版（兼容老旧系统）
 
@@ -136,9 +132,7 @@ build_win7.bat
 ```
 
 生成产物位于 `dist\`：
-- `dist\智能图像预处理工具 v3.8_Win7.exe`
-- `dist\c2bw_win7.exe`
-- `dist\c2bw_v3.8_win7.exe`
+- `dist\智能图像预处理工具 v3.9_Win7.exe`
 
 ---
 
