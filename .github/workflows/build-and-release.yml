@@ -90,8 +90,6 @@ jobs:
           if (-not $builtExe) {
             throw "Windows 10/11 build executable not found in dist/"
           }
-          Copy-Item $builtExe.FullName "dist/c2bw-windows-x64.exe" -Force
-          Copy-Item $builtExe.FullName "dist/智能图像预处理工具_${{ env.APP_VERSION }}.exe" -Force
 
       # 2. 构建 Windows 7 专用独立版 (Python 3.8 + pythonnet)
       - name: Setup Python 3.8 for Windows 7
@@ -113,16 +111,12 @@ jobs:
           if (-not $builtWin7Exe) {
             throw "Windows 7 build executable not found in dist/"
           }
-          Copy-Item $builtWin7Exe.FullName "dist/c2bw-windows7-x64.exe" -Force
-          Copy-Item $builtWin7Exe.FullName "dist/智能图像预处理工具_${{ env.APP_VERSION }}_Win7.exe" -Force
 
       - name: Generate Windows Checksums
         shell: pwsh
         run: |
           Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 v3.9.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 v3.9.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_v3.9.sha256"
           Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 v3.9_Win7.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 v3.9_Win7.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_v3.9_Win7.sha256"
-          Get-FileHash -Algorithm SHA256 "dist/c2bw-windows-x64.exe" | ForEach-Object { "$($_.Hash.ToLower())  c2bw-windows-x64.exe" } | Out-File -Encoding utf8 "dist/c2bw-windows-x64.sha256"
-          Get-FileHash -Algorithm SHA256 "dist/c2bw-windows7-x64.exe" | ForEach-Object { "$($_.Hash.ToLower())  c2bw-windows7-x64.exe" } | Out-File -Encoding utf8 "dist/c2bw-windows7-x64.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -130,10 +124,6 @@ jobs:
           path: |
             dist/智能图像预处理工具 v3.9.exe
             dist/智能图像预处理工具 v3.9_Win7.exe
-            dist/智能图像预处理工具_${{ env.APP_VERSION }}.exe
-            dist/智能图像预处理工具_${{ env.APP_VERSION }}_Win7.exe
-            dist/c2bw-windows-x64.exe
-            dist/c2bw-windows7-x64.exe
             dist/*.sha256
           if-no-files-found: error
 
