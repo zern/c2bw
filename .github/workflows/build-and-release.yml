@@ -289,7 +289,7 @@ jobs:
         run: |
           mkdir -p release-dist
           # 收集所有独立可执行文件及单独校验清单
-          find release-artifacts -type f \( -name "*.exe" -o -name "c2bw-*" -o -name "智能图像预处理工具*" \) -exec cp {} release-dist/ \;
+          find release-artifacts -type f \( -name "*.exe" -o -name "c2bw-*" -o -name "智能图像预处理工具*" -o -name "*.sha256" \) -exec cp {} release-dist/ \;
           # 生成源码 zip 归档
           git archive --format=zip --output=release-dist/c2bw-source.zip HEAD
           # 汇总计算全局 SHA256SUMS 清单
@@ -297,8 +297,20 @@ jobs:
           sha256sum * > SHA256SUMS.txt
           ls -lh
 
+      - name: Determine Release Tag
+        shell: bash
+        run: |
+          if [[ "${{ github.ref }}" == refs/tags/v* ]]; then
+            RELEASE_TAG="${GITHUB_REF#refs/tags/}"
+          else
+            RELEASE_TAG="${{ env.DEFAULT_APP_VERSION }}"
+          fi
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: 智能图像预处理工具 ${{ env.RELEASE_TAG }}
           files: release-dist/*
           generate_release_notes: true
