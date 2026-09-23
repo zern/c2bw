@@ -17,6 +17,8 @@ permissions:
 
 env:
   DEFAULT_APP_VERSION: 'v3.9'
+  PYTHONIOENCODING: 'utf-8'
+  PYTHONUTF8: '1'
 
 jobs:
   build-frontend:
@@ -90,7 +92,6 @@ jobs:
           }
           Copy-Item $builtExe.FullName "dist/c2bw-windows-x64.exe" -Force
           Copy-Item $builtExe.FullName "dist/智能图像预处理工具_${{ env.APP_VERSION }}.exe" -Force
-          Copy-Item $builtExe.FullName "dist/智能图像预处理工具 v3.9.exe" -Force
 
       # 2. 构建 Windows 7 专用独立版 (Python 3.8 + pythonnet)
       - name: Setup Python 3.8 for Windows 7
@@ -114,7 +115,6 @@ jobs:
           }
           Copy-Item $builtWin7Exe.FullName "dist/c2bw-windows7-x64.exe" -Force
           Copy-Item $builtWin7Exe.FullName "dist/智能图像预处理工具_${{ env.APP_VERSION }}_Win7.exe" -Force
-          Copy-Item $builtWin7Exe.FullName "dist/智能图像预处理工具 v3.9_Win7.exe" -Force
 
       - name: Generate Windows Checksums
         shell: pwsh

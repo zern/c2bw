@@ -4,6 +4,14 @@ import shutil
 import sys
 import time
 
+# 确保在各平台（尤其是 GitHub Actions Windows runner 的 cp1252 编码环境）输出中文字符时不报错
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 mode = sys.argv[1] if len(sys.argv) > 1 else "win11"
 
 if mode == "win11":
@@ -32,7 +40,10 @@ for t in targets:
     for attempt in range(5):
         try:
             shutil.copyfile(src, dst)
-            print(f"Generated: {dst} ({os.path.getsize(dst)} bytes)")
+            try:
+                print(f"Generated: {dst} ({os.path.getsize(dst)} bytes)")
+            except Exception:
+                pass
             break
         except PermissionError:
             if attempt == 4:
