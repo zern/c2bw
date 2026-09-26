@@ -36,7 +36,7 @@
           </svg>
           <span>GitHub</span>
         </a>
-        <el-tag class="version-tag" size="small" effect="plain">v3.9</el-tag>
+        <el-tag class="version-tag" size="small" effect="plain">v4.0</el-tag>
         
         <!-- 语言选择 -->
         <el-dropdown trigger="click" @command="changeLanguage" class="lang-dropdown">
@@ -246,6 +246,7 @@
               <el-radio-group v-model="form.bin_method" :disabled="processing">
                 <el-radio-button value="0">{{ t('binOtsu') }}</el-radio-button>
                 <el-radio-button value="1">{{ t('binCustom') }}</el-radio-button>
+                <el-radio-button value="wolf">{{ t('binWolf') }}</el-radio-button>
               </el-radio-group>
             </div>
             <div v-if="form.bin_method === '1'" class="setting-row compact-row">
@@ -259,7 +260,47 @@
               />
               <span class="unit">%</span>
             </div>
-            <p class="setting-tip">{{ t('tipBinarize') }}</p>
+            <div v-if="form.bin_method === 'wolf'" class="setting-row compact-row">
+              <span class="setting-label">{{ t('labelWolfPreset') }}</span>
+              <el-select
+                v-model="form.wolf_preset"
+                :disabled="processing"
+                size="small"
+                style="width: 260px;"
+                @change="handleWolfPresetChange"
+              >
+                <el-option value="clean" :label="t('wolfPresetClean')" />
+                <el-option value="standard" :label="t('wolfPresetStandard')" />
+                <el-option value="faint_ink" :label="t('wolfPresetFaintInk')" />
+                <el-option value="stain_suppression" :label="t('wolfPresetStainSuppression')" />
+                <el-option value="shadow_recovery" :label="t('wolfPresetShadowRecovery')" />
+              </el-select>
+            </div>
+            <div v-if="form.bin_method === 'wolf'" class="setting-row compact-row" style="margin-top: 6px;">
+              <span class="setting-label">{{ t('labelWolfParams') }}</span>
+              <span style="font-size: 12px; color: var(--el-text-color-secondary); margin-right: 4px;">{{ t('labelWolfWindow') }}:</span>
+              <el-input-number
+                v-model="form.wolf_window"
+                :min="3"
+                :max="201"
+                :step="2"
+                :disabled="processing"
+                size="small"
+                style="width: 90px; margin-right: 12px;"
+              />
+              <span style="font-size: 12px; color: var(--el-text-color-secondary); margin-right: 4px;">{{ t('labelWolfK') }}:</span>
+              <el-input-number
+                v-model="form.wolf_k"
+                :min="0.05"
+                :max="1.0"
+                :step="0.02"
+                :precision="2"
+                :disabled="processing"
+                size="small"
+                style="width: 90px;"
+              />
+            </div>
+            <p class="setting-tip">{{ form.bin_method === 'wolf' ? t('tipWolf') : t('tipBinarize') }}</p>
           </div>
 
           <div v-else class="option-body">
@@ -646,6 +687,9 @@ const form = reactive({
   enable_binarize: true,
   bin_method: '0',
   threshold_val: 50,
+  wolf_preset: 'standard',
+  wolf_window: 51,
+  wolf_k: 0.30,
   size_opt_mode: 'original',
   custom_scale: 80,
   custom_quality: 80,
@@ -657,6 +701,22 @@ const form = reactive({
   max_threads: 8,
   enable_pdf: false
 })
+
+const wolfPresets = {
+  clean: { window: 41, k: 0.22 },
+  standard: { window: 51, k: 0.30 },
+  faint_ink: { window: 61, k: 0.38 },
+  stain_suppression: { window: 71, k: 0.24 },
+  shadow_recovery: { window: 41, k: 0.34 },
+}
+
+function handleWolfPresetChange(val) {
+  if (wolfPresets[val]) {
+    form.wolf_window = wolfPresets[val].window
+    form.wolf_k = wolfPresets[val].k
+  }
+}
+
 
 // 计算属性
 const canPause = computed(() => {

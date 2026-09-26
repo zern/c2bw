@@ -17,17 +17,17 @@ mode = sys.argv[1] if len(sys.argv) > 1 else "win11"
 if mode == "win11":
     src = os.path.join("dist", "c2bw_win11.exe")
     targets = [
-        "智能图像预处理工具 v3.9.exe",
+        "智能图像预处理工具 v4.0.exe",
     ]
 elif mode == "win7":
     src = os.path.join("dist", "c2bw_win7.exe")
     targets = [
-        "智能图像预处理工具 v3.9_Win7.exe",
+        "智能图像预处理工具 v4.0_Win7.exe",
     ]
 elif mode == "nuitka":
     src = os.path.join("dist_nuitka", "c2bw_nuitka.exe")
     targets = [
-        "智能图像预处理工具 v3.9_Nuitka.exe",
+        "智能图像预处理工具 v4.0_Nuitka.exe",
     ]
 else:
     raise ValueError(f"Unknown mode: {mode}")

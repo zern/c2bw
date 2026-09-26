@@ -925,6 +925,8 @@ REPORT_TEXTS = {
         'color_enabled': "- 色彩处理: 已启用 [{detail}]",
         'color_disabled': "- 色彩处理: 未启用 (输出格式: {detail})",
         'bin_otsu': "局部动态自适应二值化 (默认)",
+        'bin_threshold': "全局固定阈值二值化 (阈值: {val})",
+        'bin_wolf': "Wolf 局部自适应二值化 (预设: {preset}，窗口: {window}，k: {k})",
         'fmt_keep': "保持原格式与品质",
         'fmt_original': "原大图片（无优化）",
         'fmt_original_pdf': "原大图片（清除水印）",
@@ -950,6 +952,8 @@ REPORT_TEXTS = {
         'input_stats_pdf': "- 原始文件包含的图片/分页数量: {count} 张 (从 PDF 提取)",
         'pdf_watermark_cleaned': "- PDF 水印处理: 已成功检测并清除 {count} 处可清除水印（结构/注释/叠加水印）",
         'pdf_watermark_none': "- PDF 水印处理: 未检测到可清除水印",
+        'pdf_bookmarks_imported': "- PDF 书签导入: 已成功导入 {count} 条原书签",
+        'pdf_bookmarks_none': "- PDF 书签导入: 原 PDF 未检测到书签",
         'input_stats_dir': "- 原始文件包含的图片/分页数量: {count} 张",
         'output_stats_crop': "- 转换后的图片总量: {total} 张 (其中排除单页数量: {excluded} 张，裁切双页数量: {cropped} 张 -> 分割生成 {generated} 张)",
         'output_stats_nocrop_direct': "- 打包图片总量: {total} 张 (未启用裁切，全为单页)",
@@ -985,6 +989,7 @@ REPORT_TEXTS = {
         'color_disabled': "- 色彩處理: 未啟用 (輸出格式: {detail})",
         'bin_otsu': "局部動態自適應二值化 (預設)",
         'bin_threshold': "全域固定閾值二值化 (閾值: {val})",
+        'bin_wolf': "Wolf 局部自適應二值化 (預設: {preset}，視窗: {window}，k: {k})",
         'fmt_keep': "保持原格式與品質",
         'fmt_original': "原大圖片（無優化）",
         'fmt_original_pdf': "原大圖片（清除水印）",
@@ -1010,10 +1015,12 @@ REPORT_TEXTS = {
         'input_stats_pdf': "- 原始檔案包含的圖片/分頁數量: {count} 張 (從 PDF 提取)",
         'pdf_watermark_cleaned': "- PDF 水印處理: 已成功檢測並清除 {count} 處可清除水印（結構/註釋/疊加水印）",
         'pdf_watermark_none': "- PDF 水印處理: 未檢測到可清除水印",
+        'pdf_bookmarks_imported': "- PDF 書籤導入: 已成功導入 {count} 條原書籤",
+        'pdf_bookmarks_none': "- PDF 書籤導入: 原 PDF 未檢測到書籤",
         'input_stats_dir': "- 原始檔案包含的圖片/分頁數量: {count} 張",
         'output_stats_crop': "- 轉換後的圖片總量: {total} 張 (其中排除單頁數量: {excluded} 張，裁切雙頁數量: {cropped} 張 -> 分割生成 {generated} 張)",
         'output_stats_nocrop_direct': "- 打包圖片總量: {total} 張 (未啟用裁切，全為單頁)",
-        'output_stats_nocrop': "- 轉換後的圖片總量: {total} 張 (未啟用裁切，全為單頁)",
+        'output_stats_nocrop': "- 轉換後的圖片總量: {total} 張 (未啟用裁切，全为單頁)",
         'succeeded_tasks': "- 任務成功項數: {succeeded} / {total}",
         'collision_groups': "- 同名消歧重命名: 為 {count} 組同名不同格式檔案自動附加來源副檔名",
         'failures_head': "- 失敗或略過 {count} 項：",
@@ -1045,6 +1052,7 @@ REPORT_TEXTS = {
         'color_disabled': "- カラー処理: 無効 (出力形式: {detail})",
         'bin_otsu': "大津の2値化 (デフォルト)",
         'bin_threshold': "固定閾値2値化 (閾値: {val})",
+        'bin_wolf': "Wolf 局所適応的2値化 (プリセット: {preset}，ウィンドウ: {window}，k: {k})",
         'fmt_keep': "元の形式と品質を維持",
         'fmt_original': "原寸大（最適化なし）",
         'fmt_original_pdf': "原寸大（透かし消去）",
@@ -1070,6 +1078,8 @@ REPORT_TEXTS = {
         'input_stats_pdf': "- 元ファイルに含まれる画像/ページ数: {count} 枚 (PDFから抽出)",
         'pdf_watermark_cleaned': "- PDF透かし処理: {count} 個の透かしを検出して削除しました（構造/注釈/オーバーレイ透かし）",
         'pdf_watermark_none': "- PDF透かし処理: 削除可能な透かしは検出されませんでした",
+        'pdf_bookmarks_imported': "- PDF しおりのインポート: {count} 件の元しおりを正常にインポートしました",
+        'pdf_bookmarks_none': "- PDF しおりのインポート: 元PDFにしおりは検出されませんでした",
         'input_stats_dir': "- 元ファイルに含まれる画像/ページ数: {count} 枚",
         'output_stats_crop': "- 処理後の画像総数: {total} 枚 (除外された単一ページ: {excluded} 枚，裁断された見開き: {cropped} 枚 -> 分割生成 {generated} 枚)",
         'output_stats_nocrop_direct': "- パック画像総数: {total} 枚 (裁断無効、すべて単一ページ)",
@@ -1105,6 +1115,7 @@ REPORT_TEXTS = {
         'color_disabled': "- Color Processing: Disabled (Output Format: {detail})",
         'bin_otsu': "OTSU Adaptive (Default)",
         'bin_threshold': "Fixed Threshold (Threshold: {val})",
+        'bin_wolf': "Wolf Local Adaptive (Preset: {preset}, Window: {window}, k: {k})",
         'fmt_keep': "Keep Original Format & Quality",
         'fmt_original': "Original Size (No Optimization)",
         'fmt_original_pdf': "Original Size (Remove Watermarks)",
@@ -1130,6 +1141,8 @@ REPORT_TEXTS = {
         'input_stats_pdf': "- Total input images/pages: {count} (Extracted from PDF)",
         'pdf_watermark_cleaned': "- PDF Watermark Cleaning: Successfully detected and removed {count} removable watermarks",
         'pdf_watermark_none': "- PDF Watermark Cleaning: No removable watermarks detected",
+        'pdf_bookmarks_imported': "- PDF Bookmarks: Successfully imported {count} bookmarks from original PDF",
+        'pdf_bookmarks_none': "- PDF Bookmarks: No bookmarks detected in original PDF",
         'input_stats_dir': "- Total input images/pages: {count}",
         'output_stats_crop': "- Total output images: {total} (Excluded single pages: {excluded}, Cropped spreads: {cropped} -> Generated {generated} pages)",
         'output_stats_nocrop_direct': "- Total packed images: {total} (Crop disabled, all single pages)",
@@ -1253,6 +1266,122 @@ def calculate_otsu_threshold(img_or_counts):
             threshold = t
 
     return threshold
+
+
+WOLF_PRESETS = {
+    'clean': {'window': 41, 'k': 0.22},
+    'standard': {'window': 51, 'k': 0.30},
+    'faint_ink': {'window': 61, 'k': 0.38},
+    'stain_suppression': {'window': 71, 'k': 0.24},
+    'shadow_recovery': {'window': 41, 'k': 0.34},
+}
+
+WOLF_PRESET_NAMES = {
+    'zh-CN': {
+        'clean': '干净',
+        'standard': '标准',
+        'faint_ink': '淡墨',
+        'stain_suppression': '污渍抑制',
+        'shadow_recovery': '阴影修复',
+    },
+    'zh-TW': {
+        'clean': '乾淨',
+        'standard': '標準',
+        'faint_ink': '淡墨',
+        'stain_suppression': '污漬抑制',
+        'shadow_recovery': '陰影修復',
+    },
+    'ja': {
+        'clean': 'クリーン',
+        'standard': '標準',
+        'faint_ink': '薄墨',
+        'stain_suppression': '汚れ抑制',
+        'shadow_recovery': '影補正',
+    },
+    'en': {
+        'clean': 'Clean',
+        'standard': 'Standard',
+        'faint_ink': 'Faint Ink',
+        'stain_suppression': 'Stain Suppression',
+        'shadow_recovery': 'Shadow Recovery',
+    },
+}
+
+
+def wolf_binarize(gray_img, window=51, k=0.30):
+    """
+    使用 Wolf 局部自适应算法对灰度图进行二值化处理，返回模式为 '1' 的 PIL Image。
+    Wolf & Doermann 局部自适应阈值公式：
+        T(x, y) = m(x, y) - k * (1 - s(x, y) / R) * (m(x, y) - M)
+    其中：
+        m(x, y): 局部窗口内的均值
+        s(x, y): 局部窗口内的标准差
+        M: 全图灰度最小值 min(I)
+        R: 全图所有局部窗口标准差的最大值 max(s)
+        k: 调整系数 (通常介于 0.2 ~ 0.4)
+    若图像像素 I(x, y) > T(x, y) 则为背景 (白, 1)，否则为前景 (黑, 0)。
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        # 回退至全局 OTSU 阈值处理
+        t_val = calculate_otsu_threshold(gray_img)
+        lut = [255 if p > t_val else 0 for p in range(256)]
+        return gray_img.point(lut, mode='1')
+
+    try:
+        if gray_img.mode != 'L':
+            gray_img = gray_img.convert('L')
+
+        im_arr = np.asarray(gray_img, dtype=np.float32)
+        h, w = im_arr.shape
+        if h == 0 or w == 0:
+            return gray_img.convert('1')
+
+        win = int(window)
+        if win < 3:
+            win = 3
+        if win % 2 == 0:
+            win += 1
+        r = win // 2
+
+        def _moving_sum_1d(arr, radius):
+            pad_w = ((0, 0), (radius + 1, radius))
+            padded = np.pad(arr, pad_w, mode='edge')
+            cs = np.cumsum(padded, axis=1)
+            return cs[:, 2 * radius + 1:] - cs[:, :-2 * radius - 1]
+
+        # 1. 局部均值 m
+        s1 = _moving_sum_1d(im_arr, r)
+        s2 = _moving_sum_1d(s1.T, r).T
+        win_area = float((2 * r + 1) * (2 * r + 1))
+        m = s2 / win_area
+
+        # 2. 局部标准差 s
+        arr_sq = im_arr * im_arr
+        sq1 = _moving_sum_1d(arr_sq, r)
+        sq2 = _moving_sum_1d(sq1.T, r).T
+        mean_sq = sq2 / win_area
+        var = np.maximum(0.0, mean_sq - m * m)
+        s = np.sqrt(var)
+
+        # 3. 全局最小值 M 与最大标准差 R
+        min_I = float(np.min(im_arr))
+        max_s = float(np.max(s))
+        R = max_s if max_s > 1e-6 else 1.0
+
+        # 4. Wolf 阈值计算
+        k_val = float(k)
+        thresh = m - k_val * (1.0 - s / R) * (m - min_I)
+
+        # 5. 生成 1 位二值图（像素 > 阈值为白/1，<= 阈值为黑/0）
+        bin_mask = (im_arr > thresh)
+        return Image.fromarray(bin_mask)
+    except Exception:
+        t_val = calculate_otsu_threshold(gray_img)
+        lut = [255 if p > t_val else 0 for p in range(256)]
+        return gray_img.point(lut, mode='1')
+
 
 
 def parse_jp2_dpi(filepath):
@@ -1393,14 +1522,22 @@ def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options
         try:
             gray_img = pil_img.convert('L')
 
-            if str(settings.get('bin_method', '0')) == "0":
+            bin_method = str(settings.get('bin_method', '0'))
+            if bin_method == 'wolf':
+                preset_key = settings.get('wolf_preset', 'standard')
+                preset_cfg = WOLF_PRESETS.get(preset_key, WOLF_PRESETS['standard'])
+                window = int(settings.get('wolf_window', preset_cfg['window']))
+                k = float(settings.get('wolf_k', preset_cfg['k']))
+                final_img = wolf_binarize(gray_img, window=window, k=k)
+            elif bin_method == '0':
                 t_val = calculate_otsu_threshold(gray_img)
+                lut = [255 if p > t_val else 0 for p in range(256)]
+                final_img = gray_img.point(lut, mode='1')
             else:
                 t_val = int((settings.get('threshold_val', 50) / 100.0) * 255)
+                lut = [255 if p > t_val else 0 for p in range(256)]
+                final_img = gray_img.point(lut, mode='1')
 
-            # 使用 Pillow 原生 C 级查找表(LUT)生成 1 位单色图，无需 numpy 内存占用与转换
-            lut = [255 if p > t_val else 0 for p in range(256)]
-            final_img = gray_img.point(lut, mode='1')
             output_path = f"{out_path_base}.tif"
             tiffinfo = TiffImagePlugin.ImageFileDirectory_v2()
             tiffinfo[278] = final_img.height  # 强制单 Strip（RowsPerStrip = 高度），保证流完整不被截断
@@ -1754,8 +1891,20 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
 
     # 色彩处理参数
     if settings.get('enable_binarize'):
-        m = t['bin_otsu'] if str(settings.get('bin_method')) == "0" else t['bin_threshold'].format(val=settings.get('threshold_val', 50))
+        bin_m = str(settings.get('bin_method', '0'))
+        if bin_m == 'wolf':
+            preset_key = settings.get('wolf_preset', 'standard')
+            preset_name = WOLF_PRESET_NAMES.get(effective_lang, {}).get(preset_key, preset_key)
+            preset_cfg = WOLF_PRESETS.get(preset_key, WOLF_PRESETS['standard'])
+            w = settings.get('wolf_window', preset_cfg['window'])
+            k = settings.get('wolf_k', preset_cfg['k'])
+            m = t['bin_wolf'].format(preset=preset_name, window=w, k=k)
+        elif bin_m == '0':
+            m = t['bin_otsu']
+        else:
+            m = t['bin_threshold'].format(val=settings.get('threshold_val', 50))
         lines.append(t['color_enabled'].format(detail=m))
+
     else:
         size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
         if size_opt_mode in ('original', 'keep'):
@@ -1819,6 +1968,12 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
                 lines.append(t['pdf_watermark_cleaned'].format(count=wm_cleaned))
             else:
                 lines.append(t['pdf_watermark_none'])
+        bms_imported = summary.get('pdf_bookmarks_imported')
+        if bms_imported is not None:
+            if bms_imported > 0:
+                lines.append(t['pdf_bookmarks_imported'].format(count=bms_imported))
+            else:
+                lines.append(t['pdf_bookmarks_none'])
     else:
         lines.append(t['input_stats_dir'].format(count=total_input))
 
@@ -2027,6 +2182,217 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
         })
 
 
+def extract_pdf_bookmarks(pdf_reader_or_path):
+    """从源 PDF 中提取书签大纲树结构及对应的原始页码。
+    返回树状结构（包含嵌套子项），如果无书签或读取失败则返回空列表。
+    """
+    if isinstance(pdf_reader_or_path, str):
+        if not os.path.isfile(pdf_reader_or_path):
+            return []
+        try:
+            reader = PdfReader(pdf_reader_or_path)
+        except Exception:
+            return []
+    else:
+        reader = pdf_reader_or_path
+
+    try:
+        outline = reader.outline
+    except Exception:
+        return []
+
+    if not outline:
+        return []
+
+    def parse_node(dest):
+        title = getattr(dest, 'title', None)
+        if not title and isinstance(dest, dict):
+            title = dest.get('/Title', '')
+        title = str(title or '未命名书签')
+
+        orig_page = None
+        try:
+            if hasattr(dest, 'page') and dest.page is not None:
+                orig_page = reader.get_destination_page_number(dest)
+            elif isinstance(dest, dict) and '/Page' in dest:
+                orig_page = reader.get_destination_page_number(dest)
+        except Exception:
+            orig_page = None
+
+        if orig_page is not None and orig_page < 0:
+            orig_page = None
+
+        color = None
+        try:
+            raw_c = None
+            if isinstance(dest, dict) and '/C' in dest:
+                raw_c = dest['/C']
+            elif hasattr(dest, 'color'):
+                raw_c = dest.color
+            if raw_c is not None:
+                color = tuple(float(x) for x in raw_c)
+                if all(abs(c) < 1e-4 for c in color):
+                    color = None
+        except Exception:
+            color = None
+
+        f_flag = dest.get('/F', 0) if isinstance(dest, dict) else 0
+        italic = bool(f_flag & 1)
+        bold = bool(f_flag & 2)
+        is_open = bool(dest.get('/%is_open%', True)) if isinstance(dest, dict) else True
+
+        return {
+            'title': title,
+            'orig_page': orig_page,
+            'color': color,
+            'bold': bold,
+            'italic': italic,
+            'is_open': is_open,
+            'children': [],
+        }
+
+    def parse_list(items):
+        result = []
+        for item in items:
+            if isinstance(item, list):
+                if result:
+                    result[-1]['children'].extend(parse_list(item))
+                else:
+                    result.extend(parse_list(item))
+            else:
+                result.append(parse_node(item))
+        return result
+
+    try:
+        return parse_list(outline)
+    except Exception:
+        return []
+
+
+def build_pdf_page_mapping(image_paths, enable_crop=True):
+    """
+    根据处理后的图片序列与处理参数，生成从原始 PDF 页码到新 PDF 页码的映射表。
+    image_paths: 按生成顺序排列的图片路径列表（对应新 PDF 各页，0-indexed）
+    enable_crop: 是否启用了分页/裁切处理
+    返回: dict { orig_page_idx: target_page_idx }
+    """
+    pattern = re.compile(r'^page_(\d+)(?:_(\d+))?(_[ABab])?(?:__.*)?$', re.IGNORECASE)
+    entries_by_orig = {}
+
+    for new_idx, img_path in enumerate(image_paths):
+        filename = os.path.basename(img_path)
+        stem = os.path.splitext(filename)[0]
+        m = pattern.match(stem)
+        if m:
+            orig_p_num = int(m.group(1))
+            orig_p_idx = orig_p_num - 1
+            cut_part = (m.group(3) or '').upper()
+            entries_by_orig.setdefault(orig_p_idx, []).append((new_idx, cut_part))
+
+    total_new_pages = len(image_paths)
+    page_map = {}
+
+    if not enable_crop:
+        # 不做分页处理的时候则按原页码导入
+        for orig_p_idx, entries in entries_by_orig.items():
+            if orig_p_idx < total_new_pages:
+                page_map[orig_p_idx] = orig_p_idx
+            else:
+                page_map[orig_p_idx] = entries[0][0]
+    else:
+        # 如果切割后则根据其所在序列位置页码添加对应书签（切割后默认添加到文件_B所在页码）
+        for orig_p_idx, entries in entries_by_orig.items():
+            b_entries = [idx for idx, part in entries if part == '_B']
+            if b_entries:
+                page_map[orig_p_idx] = b_entries[0]
+            else:
+                page_map[orig_p_idx] = entries[0][0]
+
+    return page_map
+
+
+def apply_bookmarks_to_writer(writer, bookmarks, page_mapping, enable_crop=True):
+    """
+    将提取的书签大纲树映射并导入到 PdfWriter 中。
+    writer: pypdf.PdfWriter 实例（已添加所有页面）
+    bookmarks: extract_pdf_bookmarks 提取的大纲树结构列表
+    page_mapping: build_pdf_page_mapping 构建的页码映射表
+    enable_crop: 是否启用了分页/裁切处理
+    返回: 成功导入的书签数量
+    """
+    total_pages = len(writer.pages)
+    if total_pages == 0 or not bookmarks:
+        return 0
+
+    known_keys = sorted(page_mapping.keys())
+
+    def resolve_target(orig_page):
+        if orig_page is None or orig_page < 0:
+            return None
+        if orig_page in page_mapping:
+            target = page_mapping[orig_page]
+        elif not enable_crop:
+            target = orig_page
+        else:
+            if not known_keys:
+                target = 0
+            elif orig_page <= known_keys[0]:
+                target = page_mapping[known_keys[0]]
+            elif orig_page >= known_keys[-1]:
+                target = page_mapping[known_keys[-1]]
+            else:
+                cand = known_keys[0]
+                for k in known_keys:
+                    if k <= orig_page:
+                        cand = k
+                    else:
+                        break
+                target = page_mapping[cand]
+        return min(max(0, target), total_pages - 1)
+
+    imported_count = 0
+
+    def add_tree(nodes, parent_ref=None):
+        nonlocal imported_count
+        for node in nodes:
+            orig_page = node.get('orig_page')
+            target_page = resolve_target(orig_page)
+
+            title = node.get('title', '').strip() or '未命名书签'
+            color = node.get('color')
+            bold = bool(node.get('bold', False))
+            italic = bool(node.get('italic', False))
+            is_open = bool(node.get('is_open', True))
+
+            try:
+                item_ref = writer.add_outline_item(
+                    title=title,
+                    page_number=target_page,
+                    parent=parent_ref,
+                    color=color,
+                    bold=bold,
+                    italic=italic,
+                    is_open=is_open,
+                )
+                imported_count += 1
+            except Exception:
+                item_ref = None
+
+            children = node.get('children', [])
+            if children:
+                add_tree(children, parent_ref=item_ref if item_ref is not None else parent_ref)
+
+    add_tree(bookmarks)
+
+    if imported_count > 0:
+        try:
+            writer._root_object[NameObject('/PageMode')] = NameObject('/UseOutlines')
+        except Exception:
+            pass
+
+    return imported_count
+
+
 def build_single_pdf(image_paths, pdf_path, settings=None, progress_state=None, cancel_event=None, progress_callback=None):
     """将同一个输出目录内的图片写入一个 PDF（1 位二值图严格使用 CCITT Group 4 封装）。"""
     temporary_path = f"{pdf_path}.tmp"
@@ -2053,6 +2419,22 @@ def build_single_pdf(image_paths, pdf_path, settings=None, progress_state=None, 
 
         if not writer.pages:
             return False, "没有可写入 PDF 的有效页面。"
+
+        # 从 PDF 文件开始处理时，生成新的 PDF 同时导入原 PDF 的书签（如果原 PDF 有书签）
+        if settings and (settings.get('work_mode') == 'pdf' or settings.get('pdf_path')):
+            src_pdf = settings.get('pdf_path')
+            if src_pdf and os.path.isfile(src_pdf):
+                try:
+                    bookmarks = extract_pdf_bookmarks(src_pdf)
+                    if bookmarks:
+                        enable_crop = bool(settings.get('enable_crop', False))
+                        page_map = build_pdf_page_mapping(image_paths, enable_crop=enable_crop)
+                        imported_count = apply_bookmarks_to_writer(
+                            writer, bookmarks, page_map, enable_crop=enable_crop
+                        )
+                        settings['pdf_bookmarks_imported'] = imported_count
+                except Exception:
+                    pass
 
         first_ref = writer.pages[0].indirect_reference
         if first_ref is not None:
@@ -2149,6 +2531,10 @@ _add_image_page_to_pdf_writer = add_image_page_to_pdf_writer
 _build_single_pdf = build_single_pdf
 _set_pdf_open_to_fit_page = set_pdf_open_to_fit_page
 _clean_cancelled_output = clean_cancelled_output
+_extract_pdf_bookmarks = extract_pdf_bookmarks
+_build_pdf_page_mapping = build_pdf_page_mapping
+_apply_bookmarks_to_writer = apply_bookmarks_to_writer
+_wolf_binarize = wolf_binarize
 
 __all__ = [
     'PDF_APPLICATION_NAME',
@@ -2161,6 +2547,9 @@ __all__ = [
     'get_backend_text',
     'get_system_language',
     'calculate_otsu_threshold',
+    'WOLF_PRESETS',
+    'WOLF_PRESET_NAMES',
+    'wolf_binarize',
     'parse_jp2_dpi',
     'get_normalized_dpi',
     'get_jpeg_save_options',
@@ -2180,4 +2569,8 @@ __all__ = [
     'build_single_pdf',
     'set_pdf_open_to_fit_page',
     'clean_cancelled_output',
+    'extract_pdf_bookmarks',
+    'build_pdf_page_mapping',
+    'apply_bookmarks_to_writer',
 ]
+

@@ -2,3 +2,4 @@ Pillow
 pypdf==3.17.4
 pywebview==4.4.1
 pywin32; sys_platform == 'win32'
+numpy

@@ -42,7 +42,6 @@ a = Analysis(
     hookspath=[],
     excludes=[
         'pkg_resources',
-        'numpy',
         'scipy',
         'matplotlib',
         'pandas',

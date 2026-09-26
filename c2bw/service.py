@@ -43,15 +43,19 @@ from c2bw.core import (
     add_image_page_to_pdf_writer,
     build_single_pdf,
     set_pdf_open_to_fit_page,
-    clean_cancelled_output,
+    extract_pdf_bookmarks,
+    build_pdf_page_mapping,
+    apply_bookmarks_to_writer,
+    WOLF_PRESETS,
 )
 
 
+
 APP_TITLES = {
-    'zh-CN': '智能图像预处理工具 v3.9',
-    'zh-TW': '智能圖像預處理工具 v3.9',
-    'ja': 'スマート画像前処理ツール v3.9',
-    'en': 'Smart Image Preprocessor v3.9',
+    'zh-CN': '智能图像预处理工具 v4.0',
+    'zh-TW': '智能圖像預處理工具 v4.0',
+    'ja': 'スマート画像前処理ツール v4.0',
+    'en': 'Smart Image Preprocessor v4.0',
 }
 
 QUIT_CONFIRMATIONS = {
@@ -214,6 +218,9 @@ class ImageProcessorService:
                 'enable_binarize': bool(raw_settings.get('enable_binarize', True)),
                 'bin_method': str(raw_settings.get('bin_method', '0')),
                 'threshold_val': int(raw_settings.get('threshold_val', 50)),
+                'wolf_preset': str(raw_settings.get('wolf_preset', 'standard')),
+                'wolf_window': int(raw_settings.get('wolf_window', 51)),
+                'wolf_k': float(raw_settings.get('wolf_k', 0.30)),
                 'size_opt_mode': size_opt_mode,
                 'custom_scale': custom_scale,
                 'custom_quality': custom_quality,
@@ -244,9 +251,19 @@ class ImageProcessorService:
         if not settings['enable_binarize'] and not settings['enable_crop']:
             if settings['size_opt_mode'] == 'original' and not settings['enable_pdf']:
                 return None, '请至少启用一种处理任务（色彩处理、分页裁切或文件大小优化），或勾选合并输出为 PDF。'
-        if settings['bin_method'] not in ('0', '1'):
+        if settings['bin_method'] not in ('0', '1', 'wolf'):
             return None, '二值化方式无效。'
+        if settings['enable_binarize'] and settings['bin_method'] == 'wolf':
+            if settings['wolf_preset'] not in WOLF_PRESETS:
+                settings['wolf_preset'] = 'standard'
+            if settings['wolf_window'] < 3 or settings['wolf_window'] > 201:
+                return None, 'Wolf 算法窗口大小必须在 3 到 201 之间。'
+            if settings['wolf_window'] % 2 == 0:
+                settings['wolf_window'] += 1
+            if not (0.01 <= settings['wolf_k'] <= 2.0):
+                return None, 'Wolf 算法 k 系数必须在 0.01 到 2.0 之间。'
         if settings['size_opt_mode'] not in ('original', 'mobile', 'custom'):
+
             return None, '文件大小优化选项无效。'
         if settings['size_opt_mode'] == 'custom':
             if not (1 <= settings['custom_scale'] <= 100):
@@ -325,6 +342,9 @@ class ImageProcessorService:
                 'enable_binarize': enable_binarize,
                 'bin_method': str(raw_settings.get('bin_method', '0')),
                 'threshold_val': int(raw_settings.get('threshold_val', 50)),
+                'wolf_preset': str(raw_settings.get('wolf_preset', 'standard')),
+                'wolf_window': int(raw_settings.get('wolf_window', 51)),
+                'wolf_k': float(raw_settings.get('wolf_k', 0.30)),
                 'size_opt_mode': size_opt_mode,
                 'custom_scale': custom_scale,
                 'custom_quality': custom_quality,
@@ -340,9 +360,19 @@ class ImageProcessorService:
         except (TypeError, ValueError, OverflowError):
             return None, '请使用有效的数字填写线程数、阈值和裁切参数。'
 
-        if settings['bin_method'] not in ('0', '1'):
+        if settings['bin_method'] not in ('0', '1', 'wolf'):
             return None, '二值化方式无效。'
+        if settings['enable_binarize'] and settings['bin_method'] == 'wolf':
+            if settings['wolf_preset'] not in WOLF_PRESETS:
+                settings['wolf_preset'] = 'standard'
+            if settings['wolf_window'] < 3 or settings['wolf_window'] > 201:
+                return None, 'Wolf 算法窗口大小必须在 3 到 201 之间。'
+            if settings['wolf_window'] % 2 == 0:
+                settings['wolf_window'] += 1
+            if not (0.01 <= settings['wolf_k'] <= 2.0):
+                return None, 'Wolf 算法 k 系数必须在 0.01 到 2.0 之间。'
         if settings['size_opt_mode'] not in ('original', 'mobile', 'custom'):
+
             return None, '文件大小优化选项无效。'
         if settings['size_opt_mode'] == 'custom':
             if not (1 <= settings['custom_scale'] <= 100):
@@ -1313,6 +1343,7 @@ class ImageProcessorService:
             'collision_groups': collision_groups,
             'images_kept': False,
             'pdf_watermarks_cleaned': wm_count,
+            'pdf_bookmarks_imported': settings.get('pdf_bookmarks_imported'),
         }
         summary_msg = self._build_and_save_task_report(
             summary, raw_dir,

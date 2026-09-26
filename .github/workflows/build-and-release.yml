@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  DEFAULT_APP_VERSION: 'v3.9'
+  DEFAULT_APP_VERSION: 'v4.0'
   PYTHONIOENCODING: 'utf-8'
   PYTHONUTF8: '1'
 
@@ -72,36 +72,41 @@ jobs:
           Write-Host "Resolved APP_VERSION: $ver"
           "APP_VERSION=$ver" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      # 1. 构建 Windows 10 / 11 标准版 (Python 3.11)
-      - name: Setup Python 3.11 for Windows 10/11
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Build Windows 10/11 executable
-        shell: pwsh
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt pyinstaller pythonnet clr_loader pywin32
-          python -m PyInstaller --noconfirm --clean c2bw.spec
-          python finalize_build.py win11
-          $builtExe = Get-ChildItem dist -Filter "智能图像预处理工具 v*.exe" | Where-Object { $_.Name -notmatch "_Win7" } | Select-Object -First 1
-          if (-not $builtExe) {
-            throw "Windows 10/11 build executable not found in dist/"
-          }
-
-      # 2. 构建 Windows 7 专用独立版 (Python 3.8 + pythonnet)
-      - name: Setup Python 3.8 for Windows 7
+      # 1. 构建 Windows Nuitka C++ 原生独立版 (适用于 Win10 / Win11)
+      - name: Setup Python 3.8 for Windows (Nuitka & Win7)
         uses: actions/setup-python@v5
         with:
           python-version: '3.8'
 
-      - name: Build Windows 7 executable
+      - name: Build Windows Nuitka executable
         shell: pwsh
         run: |
           python -m pip install --upgrade "pip<24.1" "setuptools<60.7" "wheel<0.46"
-          python -m pip install -r requirements-win7.txt "pywin32<=306"
+          python -m pip install -r requirements-win7.txt "pywin32<=306" nuitka zstandard
+          $dll = python -c "import os, pythonnet; print(os.path.join(os.path.dirname(pythonnet.__file__), 'runtime', 'Python.Runtime.dll'))"
+          if (Test-Path $dll) { Copy-Item $dll . -Force }
+          python -m nuitka `
+            --standalone `
+            --onefile `
+            --windows-console-mode=disable `
+            --windows-icon-from-ico=hanji.ico `
+            --include-data-dir=webui=webui `
+            --include-data-file=hanji.ico=hanji.ico `
+            --output-dir=dist_nuitka `
+            --output-filename=c2bw_nuitka.exe `
+            --assume-yes-for-downloads `
+            run_c2bw.py
+          if (Test-Path "Python.Runtime.dll") { Remove-Item "Python.Runtime.dll" -Force }
+          python finalize_build.py nuitka
+          $builtNuitkaExe = Get-ChildItem dist -Filter "智能图像预处理工具 v*_Nuitka.exe" | Select-Object -First 1
+          if (-not $builtNuitkaExe) {
+            throw "Windows Nuitka build executable not found in dist/"
+          }
+
+      # 2. 构建 Windows 7 专用独立版 (Python 3.8 + pythonnet)
+      - name: Build Windows 7 executable
+        shell: pwsh
+        run: |
           $dll = python -c "import os, pythonnet; print(os.path.join(os.path.dirname(pythonnet.__file__), 'runtime', 'Python.Runtime.dll'))"
           if (Test-Path $dll) { Copy-Item $dll . -Force }
           python -m PyInstaller --noconfirm --clean c2bw_win7.spec
@@ -115,15 +120,15 @@ jobs:
       - name: Generate Windows Checksums
         shell: pwsh
         run: |
-          Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 v3.9.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 v3.9.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_v3.9.sha256"
-          Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 v3.9_Win7.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 v3.9_Win7.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_v3.9_Win7.sha256"
+          Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 ${env:APP_VERSION}_Nuitka.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 ${env:APP_VERSION}_Nuitka.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_${env:APP_VERSION}_Nuitka.sha256"
+          Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 ${env:APP_VERSION}_Win7.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 ${env:APP_VERSION}_Win7.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_${env:APP_VERSION}_Win7.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-binaries
           path: |
-            dist/智能图像预处理工具 v3.9.exe
-            dist/智能图像预处理工具 v3.9_Win7.exe
+            dist/智能图像预处理工具 *_Nuitka.exe
+            dist/智能图像预处理工具 *_Win7.exe
             dist/*.sha256
           if-no-files-found: error
 

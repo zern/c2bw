@@ -652,7 +652,7 @@ class ImageProcessorApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("智能图像预处理工具 v3.9")
+        self.root.title("智能图像预处理工具 v4.0")
         # 在较矮的屏幕上留出系统任务栏空间，其他内容通过滚动条访问。
         window_height = min(820, max(480, self.root.winfo_screenheight() - 100))
         self.root.geometry(f"700x{window_height}")
@@ -682,7 +682,10 @@ class ImageProcessorApp:
         
         self.enable_binarize = tk.BooleanVar(value=True) 
         self.bin_method = tk.StringVar(value="0") 
-        self.threshold_val = tk.IntVar(value=50)  
+        self.threshold_val = tk.IntVar(value=50)
+        self.wolf_preset = tk.StringVar(value="standard")
+        self.wolf_window = tk.IntVar(value=51)
+        self.wolf_k = tk.DoubleVar(value=0.30)  
 
         # 取消二值化时的文件大小优化选项
         self.size_opt_mode = tk.StringVar(value="original")
@@ -835,6 +838,29 @@ class ImageProcessorApp:
         
         self.thresh_entry = ttk.Entry(radio_frame, textvariable=self.threshold_val, width=6)
         self.thresh_entry.pack(side=tk.LEFT, padx=5)
+
+        self.rb_wolf = ttk.Radiobutton(radio_frame, text="Wolf (局部自适应)", variable=self.bin_method, value="wolf", command=self.toggle_threshold)
+        self.rb_wolf.pack(side=tk.LEFT, padx=10)
+
+        self.wolf_options_frame = ttk.Frame(self.bin_options_frame)
+        self.wolf_options_frame.grid(row=1, column=1, sticky=tk.W, pady=(2, 5))
+        ttk.Label(self.wolf_options_frame, text="预设组合:").pack(side=tk.LEFT, padx=(0, 5))
+        self.wolf_preset_combo = ttk.Combobox(
+            self.wolf_options_frame,
+            values=[
+                "1. 干净 (window=41, k=0.22)",
+                "2. 标准 (window=51, k=0.30)",
+                "3. 淡墨 (window=61, k=0.38)",
+                "4. 污渍抑制 (window=71, k=0.24)",
+                "5. 阴影修复 (window=41, k=0.34)",
+            ],
+            state="readonly",
+            width=28,
+        )
+        self.wolf_preset_combo.pack(side=tk.LEFT, padx=(0, 5))
+        self.wolf_preset_combo.current(1)
+        self.wolf_preset_combo.bind("<<ComboboxSelected>>", self.on_wolf_preset_change)
+
 
         # 新增：取消二值化时的文件大小优化选择
         self.non_bin_options_frame = ttk.Frame(bin_frame)
@@ -1234,12 +1260,30 @@ class ImageProcessorApp:
 
         self._update_pdf_hint()
 
+    WOLF_PRESET_MAP = {
+        0: ("clean", 41, 0.22),
+        1: ("standard", 51, 0.30),
+        2: ("faint_ink", 61, 0.38),
+        3: ("stain_suppression", 71, 0.24),
+        4: ("shadow_recovery", 41, 0.34),
+    }
+
+    def on_wolf_preset_change(self, event=None):
+        idx = self.wolf_preset_combo.current()
+        if idx in self.WOLF_PRESET_MAP:
+            key, win, k = self.WOLF_PRESET_MAP[idx]
+            self.wolf_preset.set(key)
+            self.wolf_window.set(win)
+            self.wolf_k.set(k)
+
     def toggle_bin_options(self):
         state = tk.NORMAL if self.enable_binarize.get() else tk.DISABLED
         self.rb_otsu.config(state=state)
         self.rb_custom.config(state=state)
+        self.rb_wolf.config(state=state)
         if not self.enable_binarize.get():
             self.thresh_entry.config(state=tk.DISABLED)
+            self.wolf_preset_combo.config(state=tk.DISABLED)
         else:
             self.toggle_threshold()
 
@@ -1256,6 +1300,12 @@ class ImageProcessorApp:
             self.thresh_entry.config(state=tk.NORMAL)
         else:
             self.thresh_entry.config(state=tk.DISABLED)
+
+        if self.enable_binarize.get() and self.bin_method.get() == "wolf":
+            self.wolf_preset_combo.config(state="readonly")
+        else:
+            self.wolf_preset_combo.config(state=tk.DISABLED)
+
 
     def toggle_crop_options(self):
         state = tk.NORMAL if self.enable_crop.get() else tk.DISABLED
@@ -1467,6 +1517,9 @@ class ImageProcessorApp:
                 'enable_binarize': self.enable_binarize.get(),
                 'bin_method': self.bin_method.get(),
                 'threshold_val': self.threshold_val.get(),
+                'wolf_preset': self.wolf_preset.get(),
+                'wolf_window': self.wolf_window.get(),
+                'wolf_k': self.wolf_k.get(),
                 'size_opt_mode': self.size_opt_mode.get(),
                 'custom_scale': self.custom_scale.get(),
                 'custom_quality': self.custom_quality.get(),
@@ -1608,6 +1661,9 @@ class ImageProcessorApp:
                 'enable_binarize': enable_binarize,
                 'bin_method': self.bin_method.get(),
                 'threshold_val': thresh,
+                'wolf_preset': self.wolf_preset.get(),
+                'wolf_window': self.wolf_window.get(),
+                'wolf_k': self.wolf_k.get(),
                 'size_opt_mode': size_opt_mode,
                 'custom_scale': self.custom_scale.get(),
                 'custom_quality': self.custom_quality.get(),
