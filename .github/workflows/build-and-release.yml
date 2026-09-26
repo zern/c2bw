@@ -129,6 +129,7 @@ jobs:
             --assume-yes-for-downloads `
             run_c2bw.py
           if (Test-Path "Python.Runtime.dll") { Remove-Item "Python.Runtime.dll" -Force }
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
           python finalize_build.py nuitka
           $builtNuitkaExe = Get-ChildItem dist -Filter "智能图像预处理工具 v*_Nuitka.exe" | Select-Object -First 1
           if (-not $builtNuitkaExe) {

@@ -35,6 +35,8 @@ else:
 if not os.path.exists(src):
     raise FileNotFoundError("Source not found: " + src)
 
+os.makedirs("dist", exist_ok=True)
+
 for t in targets:
     dst = os.path.join("dist", t)
     for attempt in range(5):
