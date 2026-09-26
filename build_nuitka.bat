@@ -39,6 +39,12 @@ set "no_proxy=*"
     --onefile ^
     --windows-console-mode=disable ^
     --windows-icon-from-ico=hanji.ico ^
+    --company-name="漢籍合璧" ^
+    --product-name="智能图像预处理工具 v4.0" ^
+    --file-version=4.0.0.0 ^
+    --product-version=4.0.0.0 ^
+    --file-description="智能图像预处理工具 v4.0" ^
+    --copyright="By weiceng © 漢籍合璧" ^
     --include-data-dir=webui=webui ^
     --include-data-file=hanji.ico=hanji.ico ^
     --include-data-dir="%APPDATA%\Python\Python38\site-packages\pythonnet\runtime"=pythonnet/runtime ^

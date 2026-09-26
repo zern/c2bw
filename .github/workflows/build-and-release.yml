@@ -85,7 +85,8 @@ jobs:
           python -m pip install -r requirements-win7.txt "pywin32<=306" nuitka zstandard
           $dll = python -c "import os, pythonnet; print(os.path.join(os.path.dirname(pythonnet.__file__), 'runtime', 'Python.Runtime.dll'))"
           if (Test-Path $dll) { Copy-Item $dll . -Force }
-          python -m nuitka `
+          $verFlags = python get_version_info.py --nuitka-flags
+          python -m nuitka $verFlags `
             --standalone `
             --onefile `
             --windows-console-mode=disable `
