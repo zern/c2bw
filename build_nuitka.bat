@@ -43,6 +43,38 @@ set "no_proxy=*"
     --include-data-file=hanji.ico=hanji.ico ^
     --include-data-dir="%APPDATA%\Python\Python38\site-packages\pythonnet\runtime"=pythonnet/runtime ^
     --include-data-dir="%APPDATA%\Python\Python38\site-packages\clr_loader\ffi\dlls"=clr_loader/ffi/dlls ^
+    --enable-plugin=tk-inter ^
+    --nofollow-import-to=jinja2 ^
+    --nofollow-import-to=markupsafe ^
+    --nofollow-import-to=mako ^
+    --nofollow-import-to=cryptography ^
+    --nofollow-import-to=Crypto ^
+    --nofollow-import-to=bcrypt ^
+    --nofollow-import-to=gevent ^
+    --nofollow-import-to=greenlet ^
+    --nofollow-import-to=zope ^
+    --nofollow-import-to=psutil ^
+    --nofollow-import-to=scipy ^
+    --nofollow-import-to=matplotlib ^
+    --nofollow-import-to=pandas ^
+    --nofollow-import-to=sqlite3 ^
+    --nofollow-import-to=unittest ^
+    --nofollow-import-to=pytest ^
+    --nofollow-import-to=doctest ^
+    --nofollow-import-to=test ^
+    --nofollow-import-to=distutils ^
+    --nofollow-import-to=setuptools ^
+    --nofollow-import-to=pkg_resources ^
+    --nofollow-import-to=pip ^
+    --nofollow-import-to=win32ui ^
+    --nofollow-import-to=Pythonwin ^
+    --nofollow-import-to=IPython ^
+    --nofollow-import-to=pydoc ^
+    --nofollow-import-to=difflib ^
+    --nofollow-import-to=lib2to3 ^
+    --nofollow-import-to=idlelib ^
+    --nofollow-import-to=turtle ^
+    --nofollow-import-to=turtledemo ^
     --output-dir=dist_nuitka ^
     --output-filename=c2bw_nuitka.exe ^
     --assume-yes-for-downloads ^

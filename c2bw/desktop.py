@@ -5,14 +5,10 @@ c2bw.desktop - 桌面端宿主模块
 
 import os
 import sys
-import io
-import shutil
 import tempfile
 import threading
 import queue
 import re
-import json
-import webbrowser
 import socket
 import webview
 
@@ -20,49 +16,20 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 import tkinter.font as tkfont
 
-
-
 from c2bw.core import (
     PDF_APPLICATION_NAME,
     PDF_SPEC_VERSION,
     extract_images_from_pdf,
     get_task_suffix,
-    BACKEND_LOGS,
-    REPORT_TEXTS,
     get_backend_text,
     get_system_language,
-    calculate_otsu_threshold,
-    parse_jp2_dpi,
-    get_normalized_dpi,
-    get_jpeg_save_options,
-    save_image_atomically,
-    copy_file_atomically,
-    save_image,
-    remove_outputs,
-    make_result,
-    process_single_image,
-    is_same_or_parent,
-    natural_sort_key,
-    assign_output_stems,
-    completion_text,
-    build_task_report,
-    add_image_page_to_pdf_writer,
-    build_single_pdf,
-    set_pdf_open_to_fit_page,
-    clean_cancelled_output,
 )
 from c2bw.service import (
     APP_TITLES,
     QUIT_CONFIRMATIONS,
-    UPDATE_INFO_URL,
     get_config_dir,
-    get_config_path,
-    load_user_config,
-    save_user_config,
     get_saved_language,
-    save_user_language,
     ImageProcessorService,
-    WebImageProcessorService,
 )
 
 

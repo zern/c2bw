@@ -5,14 +5,10 @@ c2bw.service - 任务调度与状态机模块
 
 import os
 import sys
-import io
 import shutil
-import re
 import json
 import queue
 import threading
-import concurrent.futures
-import urllib.request
 import webbrowser
 
 from c2bw.core import (
@@ -21,31 +17,15 @@ from c2bw.core import (
     clean_pdf_watermarks,
     extract_images_from_pdf,
     get_task_suffix,
-    BACKEND_LOGS,
-    REPORT_TEXTS,
     get_backend_text,
     get_system_language,
-    calculate_otsu_threshold,
-    parse_jp2_dpi,
-    get_normalized_dpi,
-    get_jpeg_save_options,
-    save_image_atomically,
-    copy_file_atomically,
-    save_image,
-    remove_outputs,
     make_result,
     process_single_image,
     is_same_or_parent,
     natural_sort_key,
     assign_output_stems,
-    completion_text,
     build_task_report,
-    add_image_page_to_pdf_writer,
     build_single_pdf,
-    set_pdf_open_to_fit_page,
-    extract_pdf_bookmarks,
-    build_pdf_page_mapping,
-    apply_bookmarks_to_writer,
     WOLF_PRESETS,
 )
 
