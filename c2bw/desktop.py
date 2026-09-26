@@ -1246,14 +1246,14 @@ class ImageProcessorApp:
                 if mode == "original":
                     hint = "说明: 仅清除PDF文件中可移除的水印，保持原始尺寸与格式输出。"
                 elif mode == "mobile":
-                    hint = "说明: 默认先清除水印，再调整为 2160px 宽，输出高质量渐进式 JPEG。"
+                    hint = "说明: 默认先清除水印，双页限宽 2160px、单页限宽 1080px（不放大），输出高质量渐进式 JPEG。"
                 else:
                     hint = "说明: 默认先清除水印，再自由调整缩放比例与 JPEG 质量。"
             else:
                 if mode == "original":
                     hint = "说明: 默认项不做调整，保持原始尺寸与格式输出。"
                 elif mode == "mobile":
-                    hint = "说明: 限制最长边不超过 2160px，并转换为高质量 JPG，缩减体积。"
+                    hint = "说明: 双页限宽 2160px、分页判定单页原图限宽 1080px（不放大），转为高质量渐进式 JPG。"
                 else:
                     hint = "说明: 按指定比例缩放并压缩为指定质量的 JPG。"
             self.size_opt_hint_label.config(text=hint)

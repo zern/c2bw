@@ -930,7 +930,7 @@ REPORT_TEXTS = {
         'fmt_keep': "保持原格式与品质",
         'fmt_original': "原大图片（无优化）",
         'fmt_original_pdf': "原大图片（清除水印）",
-        'fmt_mobile': "精简尺寸（宽度≤2160px，JPEG 渐进质量 75）",
+        'fmt_mobile': "精简尺寸（单页≤1080px/双页≤2160px，JPEG 渐进质量 75）",
         'fmt_custom': "自定义参数（缩放 {scale}%，JPEG 渐进质量 {quality}）",
         'fmt_jpg80': "转换为 JPG (质量 80)",
 
@@ -993,7 +993,7 @@ REPORT_TEXTS = {
         'fmt_keep': "保持原格式與品質",
         'fmt_original': "原大圖片（無優化）",
         'fmt_original_pdf': "原大圖片（清除水印）",
-        'fmt_mobile': "精簡尺寸（寬度≤2160px，JPEG 漸進品質 75）",
+        'fmt_mobile': "精簡尺寸（單頁≤1080px/雙頁≤2160px，JPEG 漸進品質 75）",
         'fmt_custom': "自定義參數（縮放 {scale}%，JPEG 漸進品質 {quality}）",
         'fmt_jpg80': "轉換為 JPG (品質 80)",
 
@@ -1056,7 +1056,7 @@ REPORT_TEXTS = {
         'fmt_keep': "元の形式と品質を維持",
         'fmt_original': "原寸大（最適化なし）",
         'fmt_original_pdf': "原寸大（透かし消去）",
-        'fmt_mobile': "縮小サイズ（幅≤2160px、プログレッシブ JPEG 品質 75）",
+        'fmt_mobile': "縮小サイズ（単一ページ≤1080px/見開き≤2160px、プログレッシブ JPEG 品質 75）",
         'fmt_custom': "カスタム設定（縮小率 {scale}%、プログレッシブ JPEG 品質 {quality}）",
         'fmt_jpg80': "JPGに変換 (品質 80)",
 
@@ -1119,7 +1119,7 @@ REPORT_TEXTS = {
         'fmt_keep': "Keep Original Format & Quality",
         'fmt_original': "Original Size (No Optimization)",
         'fmt_original_pdf': "Original Size (Remove Watermarks)",
-        'fmt_mobile': "Compact Size (Width ≤ 2160px, Progressive JPEG Q75)",
+        'fmt_mobile': "Compact Size (Single ≤ 1080px / Spread ≤ 2160px, Progressive JPEG Q75)",
         'fmt_custom': "Custom Parameters (Scale {scale}%, Progressive JPEG Q{quality})",
         'fmt_jpg80': "Convert to JPG (Quality 80)",
 
@@ -1703,14 +1703,19 @@ def process_single_image(src_path, rel_path, filename, output_stem, settings,
         jp2_save_options = get_jp2_save_options(img, src_path) if original_ext in ('.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c') else None
 
         # 检查是否需在裁切前进行文件大小优化与尺寸重采样
+        is_excluded = bool(settings.get('enable_crop') and (aspect_ratio < settings.get('exclude_ratio', 0.8)))
         size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
         if not settings.get('enable_binarize'):
             resample_filter = getattr(Image, 'Resampling', Image).LANCZOS
             if size_opt_mode == 'mobile':
-                if w > 2160:
+                # 精简尺寸（适合手机）模式：
+                # 开启分页处理且判定为单页原图的，宽度调整为 1080 像素（宽度 ≤1080px 不放大）；
+                # 双页跨页图（或未开启分页处理）则限制最大宽度为 2160 像素（裁切后单页约为 1080px，≤2160px 不放大）
+                max_w = 1080 if is_excluded else 2160
+                if w > max_w:
                     img.load()
-                    target_w = 2160
-                    target_h = max(1, int(round(h * 2160.0 / w)))
+                    target_w = max_w
+                    target_h = max(1, int(round(h * float(max_w) / w)))
                     resized = img.resize((target_w, target_h), resample_filter)
                     resized.info['dpi'] = norm_dpi
                     img.close()
@@ -1731,7 +1736,6 @@ def process_single_image(src_path, rel_path, filename, output_stem, settings,
                     w, h = img.size
                     aspect_ratio = w / h
 
-        is_excluded = settings.get('enable_crop') and (aspect_ratio < settings.get('exclude_ratio', 0.8))
         if not settings.get('enable_crop') or aspect_ratio < settings.get('exclude_ratio', 0.8):
             # 未二值化、保持原大且未实际裁切时，直接复制源文件以完整保留 JPEG 品质与元数据。
             if not settings.get('enable_binarize') and size_opt_mode in ('original', 'keep'):
