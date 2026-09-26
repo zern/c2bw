@@ -126,7 +126,7 @@ build_nuitka.bat
 ```
 
 脚本将自动执行前端 Vite 打包、准备运行时依赖、调用 Nuitka 编译链接并在 `dist\` 生成：
-- `dist\智能图像预处理工具 v4.0_Nuitka.exe`
+- `dist\智能图像预处理工具 v4.0.exe`（Release 对应英文名：`dist\c2bw-v4.0.exe`）
 
 也可直接运行 `build.bat` 同时构建 Nuitka 版与 Windows 7 版：
 
@@ -143,7 +143,7 @@ build_win7.bat
 ```
 
 生成产物位于 `dist\`：
-- `dist\智能图像预处理工具 v4.0_Win7.exe`
+- `dist\智能图像预处理工具 v4.0_Win7.exe`（Release 对应英文名：`dist\c2bw-v4.0_Win7.exe`）
 
 ---
 
@@ -152,14 +152,14 @@ build_win7.bat
 本项目配置了完整的 GitHub Actions 自动化持续集成与发布流水线（`.github/workflows/build-and-release.yml`），原生支持跨平台自动化构建无依赖单文件：
 
 ### 1. 预编译单文件下载 (GitHub Releases)
-- **Windows 10 / 11 (x64)**：`c2bw-windows-x64.exe`
-- **Windows 7 独立版 (x64)**：`c2bw-windows7-x64.exe` (内嵌 .NET 运行时)
-- **macOS Intel (x86_64)**：`c2bw-macos-x86_64` (适配 Intel 处理器 Mac)
-- **macOS Apple Silicon (arm64)**：`c2bw-macos-arm64` (适配 M1/M2/M3/M4 芯片 Mac)
-- **Linux (x64)**：`c2bw-linux-x64` (适配主流 Linux 发行版，glibc >= 2.35)
+- **Windows 10 / 11 (x64)**：`智能图像预处理工具 v4.0.exe` / `c2bw-v4.0.exe` (Nuitka C++ 原生独立版，推荐)
+- **Windows 7 独立版 (x64)**：`智能图像预处理工具 v4.0_Win7.exe` / `c2bw-v4.0_Win7.exe` (内嵌兼容运行时与 MSHTML 内核)
+- **macOS Apple Silicon (arm64)**：`智能图像预处理工具_v4.0_macOS_arm64` / `c2bw-v4.0-macos-arm64` (适配 M 系列芯片 Mac)
+- **macOS Intel (x86_64)**：`智能图像预处理工具_v4.0_macOS_x86_64` / `c2bw-v4.0-macos-x86_64` (适配 Intel 处理器 Mac)
+- **Linux (x64)**：`智能图像预处理工具_v4.0_Linux_x64` / `c2bw-v4.0-linux-x64` (适配主流 Linux 发行版，glibc >= 2.35)
 
 > **触发机制**：
-> - **自动发布**：向仓库推送版本标签（如 `git tag v3.8 && git push origin v3.8`）时，自动触发全平台并行编译并直接创建 GitHub Release 附带全部二进制文件及 `SHA256SUMS.txt` 校验清单；
+> - **自动发布**：向仓库推送版本标签（如 `git tag v4.0 && git push origin v4.0`）时，自动触发全平台并行编译并直接创建 GitHub Release 附带全部二进制文件及 `SHA256SUMS.txt` 校验清单；
 > - **手动触发**：亦可在 GitHub 仓库的 `Actions` 页面选择 `Build and Release Multi-Platform Binaries` 手动一键运行测试。
 
 ### 2. 本地手工构建命令

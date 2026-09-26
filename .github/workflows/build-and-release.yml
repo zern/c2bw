@@ -131,7 +131,7 @@ jobs:
           if (Test-Path "Python.Runtime.dll") { Remove-Item "Python.Runtime.dll" -Force }
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           python finalize_build.py nuitka
-          $builtNuitkaExe = Get-ChildItem dist -Filter "智能图像预处理工具 v*_Nuitka.exe" | Select-Object -First 1
+          $builtNuitkaExe = Get-ChildItem dist -Filter "智能图像预处理工具 v*.exe" | Where-Object { $_.Name -notmatch "_Win7" } | Select-Object -First 1
           if (-not $builtNuitkaExe) {
             throw "Windows Nuitka build executable not found in dist/"
           }
@@ -153,15 +153,17 @@ jobs:
       - name: Generate Windows Checksums
         shell: pwsh
         run: |
-          Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 ${env:APP_VERSION}_Nuitka.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 ${env:APP_VERSION}_Nuitka.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_${env:APP_VERSION}_Nuitka.sha256"
+          Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 ${env:APP_VERSION}.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 ${env:APP_VERSION}.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_${env:APP_VERSION}.sha256"
           Get-FileHash -Algorithm SHA256 "dist/智能图像预处理工具 ${env:APP_VERSION}_Win7.exe" | ForEach-Object { "$($_.Hash.ToLower())  智能图像预处理工具 ${env:APP_VERSION}_Win7.exe" } | Out-File -Encoding utf8 "dist/智能图像预处理工具_${env:APP_VERSION}_Win7.sha256"
+          Get-FileHash -Algorithm SHA256 "dist/c2bw-${env:APP_VERSION}.exe" | ForEach-Object { "$($_.Hash.ToLower())  c2bw-${env:APP_VERSION}.exe" } | Out-File -Encoding utf8 "dist/c2bw-${env:APP_VERSION}.sha256"
+          Get-FileHash -Algorithm SHA256 "dist/c2bw-${env:APP_VERSION}_Win7.exe" | ForEach-Object { "$($_.Hash.ToLower())  c2bw-${env:APP_VERSION}_Win7.exe" } | Out-File -Encoding utf8 "dist/c2bw-${env:APP_VERSION}_Win7.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: windows-binaries
           path: |
-            dist/智能图像预处理工具 *_Nuitka.exe
-            dist/智能图像预处理工具 *_Win7.exe
+            dist/智能图像预处理工具 *.exe
+            dist/c2bw-*.exe
             dist/*.sha256
           if-no-files-found: error
 
@@ -213,26 +215,26 @@ jobs:
       - name: Build macOS single-file executable
         run: |
           python -m PyInstaller --noconfirm --clean c2bw_macos.spec
-          cp dist/c2bw "dist/c2bw-macos-${{ matrix.arch }}"
+          cp dist/c2bw "dist/c2bw-${{ env.APP_VERSION }}-macos-${{ matrix.arch }}"
           cp dist/c2bw "dist/智能图像预处理工具_${{ env.APP_VERSION }}_macOS_${{ matrix.arch }}"
-          chmod +x "dist/c2bw-macos-${{ matrix.arch }}" "dist/智能图像预处理工具_${{ env.APP_VERSION }}_macOS_${{ matrix.arch }}"
+          chmod +x "dist/c2bw-${{ env.APP_VERSION }}-macos-${{ matrix.arch }}" "dist/智能图像预处理工具_${{ env.APP_VERSION }}_macOS_${{ matrix.arch }}"
 
       - name: Verify architecture
         run: |
-          file "dist/c2bw-macos-${{ matrix.arch }}"
-          test -x "dist/c2bw-macos-${{ matrix.arch }}"
+          file "dist/c2bw-${{ env.APP_VERSION }}-macos-${{ matrix.arch }}"
+          test -x "dist/c2bw-${{ env.APP_VERSION }}-macos-${{ matrix.arch }}"
 
       - name: Generate checksum
         run: |
-          shasum -a 256 "dist/c2bw-macos-${{ matrix.arch }}" > "dist/c2bw-macos-${{ matrix.arch }}.sha256"
+          shasum -a 256 "dist/c2bw-${{ env.APP_VERSION }}-macos-${{ matrix.arch }}" > "dist/c2bw-${{ env.APP_VERSION }}-macos-${{ matrix.arch }}.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: macos-${{ matrix.arch }}-binary
           path: |
-            dist/c2bw-macos-${{ matrix.arch }}
+            dist/c2bw-${{ env.APP_VERSION }}-macos-${{ matrix.arch }}
             dist/智能图像预处理工具_${{ env.APP_VERSION }}_macOS_${{ matrix.arch }}
-            dist/c2bw-macos-${{ matrix.arch }}.sha256
+            dist/c2bw-${{ env.APP_VERSION }}-macos-${{ matrix.arch }}.sha256
           if-no-files-found: error
 
   build-linux:
@@ -287,26 +289,26 @@ jobs:
       - name: Build Linux single-file executable
         run: |
           python -m PyInstaller --noconfirm --clean c2bw_linux.spec
-          cp dist/c2bw dist/c2bw-linux-x64
+          cp dist/c2bw "dist/c2bw-${{ env.APP_VERSION }}-linux-x64"
           cp dist/c2bw "dist/智能图像预处理工具_${{ env.APP_VERSION }}_Linux_x64"
-          chmod +x dist/c2bw-linux-x64 "dist/智能图像预处理工具_${{ env.APP_VERSION }}_Linux_x64"
+          chmod +x "dist/c2bw-${{ env.APP_VERSION }}-linux-x64" "dist/智能图像预处理工具_${{ env.APP_VERSION }}_Linux_x64"
 
       - name: Verify executable
         run: |
-          file dist/c2bw-linux-x64
-          test -x dist/c2bw-linux-x64
+          file "dist/c2bw-${{ env.APP_VERSION }}-linux-x64"
+          test -x "dist/c2bw-${{ env.APP_VERSION }}-linux-x64"
 
       - name: Generate checksum
         run: |
-          sha256sum dist/c2bw-linux-x64 > dist/c2bw-linux-x64.sha256
+          sha256sum "dist/c2bw-${{ env.APP_VERSION }}-linux-x64" > "dist/c2bw-${{ env.APP_VERSION }}-linux-x64.sha256"
 
       - uses: actions/upload-artifact@v4
         with:
           name: linux-binary
           path: |
-            dist/c2bw-linux-x64
+            dist/c2bw-${{ env.APP_VERSION }}-linux-x64
             dist/智能图像预处理工具_${{ env.APP_VERSION }}_Linux_x64
-            dist/c2bw-linux-x64.sha256
+            dist/c2bw-${{ env.APP_VERSION }}-linux-x64.sha256
           if-no-files-found: error
 
   release:

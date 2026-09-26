@@ -25,6 +25,8 @@ if errorlevel 1 (
 echo.
 echo ==========================================================
 echo  Build complete! Output binaries:
-echo   - dist\智能图像预处理工具 v4.0_Nuitka.exe
+echo   - dist\智能图像预处理工具 v4.0.exe
 echo   - dist\智能图像预处理工具 v4.0_Win7.exe
+echo   - dist\c2bw-v4.0.exe
+echo   - dist\c2bw-v4.0_Win7.exe
 echo ==========================================================
