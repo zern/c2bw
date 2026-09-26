@@ -9,6 +9,8 @@ import shutil
 import json
 import queue
 import threading
+import concurrent.futures
+import urllib.request
 import webbrowser
 
 from c2bw.core import (
@@ -26,6 +28,7 @@ from c2bw.core import (
     assign_output_stems,
     build_task_report,
     build_single_pdf,
+    clean_cancelled_output,
     WOLF_PRESETS,
 )
 
