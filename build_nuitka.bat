@@ -49,6 +49,18 @@ set "no_proxy=*"
     --include-data-file=hanji.ico=hanji.ico ^
     --include-data-dir="%APPDATA%\Python\Python38\site-packages\pythonnet\runtime"=pythonnet/runtime ^
     --include-data-dir="%APPDATA%\Python\Python38\site-packages\clr_loader\ffi\dlls"=clr_loader/ffi/dlls ^
+    --include-data-files="%APPDATA%\Python\Python38\site-packages\pymupdf\*.*=pymupdf/" ^
+    --include-data-files="%APPDATA%\Python\Python38\site-packages\pymupdf\mupdfcpp64.dll=mupdfcpp64.dll" ^
+    --include-data-files="C:\Program Files\python\python3.dll=python3.dll" ^
+    --include-data-files="C:\Program Files\python\python3.dll=pymupdf/python3.dll" ^
+    --include-data-files="C:\Windows\System32\msvcp140.dll=msvcp140.dll" ^
+    --include-data-files="C:\Windows\System32\msvcp140.dll=pymupdf/msvcp140.dll" ^
+    --include-data-files="C:\Windows\System32\vcruntime140_1.dll=vcruntime140_1.dll" ^
+    --include-data-files="C:\Windows\System32\vcruntime140_1.dll=pymupdf/vcruntime140_1.dll" ^
+    --include-data-files="%APPDATA%\Python\Python38\site-packages\fitz\*.*=fitz/" ^
+    --nofollow-import-to=fitz ^
+    --nofollow-import-to=pymupdf ^
+    --no-deployment-flag=excluded-module-usage ^
     --enable-plugin=tk-inter ^
     --nofollow-import-to=jinja2 ^
     --nofollow-import-to=markupsafe ^

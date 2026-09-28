@@ -93,6 +93,8 @@ jobs:
             --windows-icon-from-ico=hanji.ico `
             --include-data-dir=webui=webui `
             --include-data-file=hanji.ico=hanji.ico `
+            --include-package=pymupdf `
+            --include-package=fitz `
             --enable-plugin=tk-inter `
             --nofollow-import-to=jinja2 `
             --nofollow-import-to=markupsafe `

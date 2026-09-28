@@ -22,6 +22,59 @@ from pypdf.generic import (
 from pypdf.filters import decode_stream_data
 import pypdf.filters
 
+# 兼容 Nuitka / PyInstaller 单文件打包运行环境
+def _setup_core_bundle_env():
+    bundle_dirs = []
+    if hasattr(sys, '_MEIPASS'):
+        bundle_dirs.append(getattr(sys, '_MEIPASS'))
+    compiled_info = getattr(sys.modules.get('__main__'), '__compiled__', None) or globals().get('__compiled__')
+    if compiled_info is not None:
+        if hasattr(compiled_info, 'containing_dir') and compiled_info.containing_dir:
+            bundle_dirs.append(compiled_info.containing_dir)
+        elif len(compiled_info) > 4 and compiled_info[4]:
+            bundle_dirs.append(compiled_info[4])
+    if os.environ.get("NUITKA_ONEFILE_DIRECTORY"):
+        bundle_dirs.append(os.environ.get("NUITKA_ONEFILE_DIRECTORY"))
+    if '__file__' in globals():
+        bundle_dirs.append(os.path.dirname(os.path.abspath(__file__)))
+    bundle_dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
+    temp_dir = os.environ.get('TEMP')
+    if temp_dir and os.path.exists(temp_dir):
+        import glob
+        matches = sorted(glob.glob(os.path.join(temp_dir, 'onefile_*')), key=os.path.getmtime, reverse=True)
+        for m in matches:
+            bundle_dirs.append(m)
+
+    for _bdir in bundle_dirs:
+        if _bdir and os.path.exists(_bdir):
+            if _bdir not in sys.path:
+                sys.path.insert(0, _bdir)
+            _mpdir = os.path.join(_bdir, 'pymupdf')
+            if hasattr(os, 'add_dll_directory'):
+                try:
+                    os.add_dll_directory(_bdir)
+                except Exception:
+                    pass
+                if os.path.exists(_mpdir):
+                    try:
+                        os.add_dll_directory(_mpdir)
+                    except Exception:
+                        pass
+            os.environ['PATH'] = _bdir + os.pathsep + _mpdir + os.pathsep + os.environ.get('PATH', '')
+
+_setup_core_bundle_env()
+
+# 全格式极速无损提取引擎（优先使用 PyMuPDF/pymupdf，支持 JBIG2、JPEG、TIFF、Flate 等）
+_fitz_import_error = None
+try:
+    import pymupdf as fitz
+except Exception as _e1:
+    try:
+        import fitz
+    except Exception as _e2:
+        fitz = None
+        _fitz_import_error = f"pymupdf err: {_e1}; fitz err: {_e2}"
+
 # 针对 pypdf 部分版本在遇到末尾缺少 '>' 的 ASCIIHexDecode 数据流时报错的兼容性补丁
 _orig_asciihex_decode = pypdf.filters.ASCIIHexDecode.decode
 def _safe_asciihex_decode(data, decode_parms=None):
@@ -637,8 +690,241 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
         return pdf_path, 0, None
 
 
-def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cancel_event=None):
-    """从图片打包型 PDF 中提取所有原始分页图片到指定目录（保持原图质量与参数，不作有损重压缩）。"""
+def _select_bottom_layer_image(page, img_keys):
+    """
+    当页面出现多个图层/多张图片时，精准识别并仅保留最底层的图片（Bottom Layer Image）。
+    判定规则：
+    1. 物理对象去重：排除指向相同 indirect_reference / 相同 XObject 对象的别名重复引用（如 /Fm0 与 /Im0）；
+    2. 解析内容流（/Contents）中绘制指令（Do）的执行顺序：
+       在 PDF 规范中，页面指令是自底向顶顺序绘制的，最早被 Do 调用的图像首先铺在画布最底层；
+    3. 过滤掩模与遮罩层（/SMask, /Mask）及水印/Logo小图；
+    4. 兜底策略：若无内容流顺序，则选择面积最大的主图（底层版面图）；若尺寸相同，取最先声明的底层图像；
+    5. 最终仅返回单个最底层图片的 ID（键名）。
+    """
+    if not img_keys:
+        return None
+    if len(img_keys) == 1:
+        return img_keys[0]
+
+    # 1. 物理对象去重
+    unique_candidates = []
+    seen_refs = set()
+    for img_id in img_keys:
+        xobj = _resolve_pdf_xobject(page, img_id)
+        ref_key = None
+        if xobj is not None:
+            ref = getattr(xobj, 'indirect_reference', None)
+            if ref is not None:
+                if hasattr(ref, 'idnum') and hasattr(ref, 'generation'):
+                    ref_key = (ref.idnum, ref.generation)
+                else:
+                    try:
+                        hash(ref)
+                        ref_key = ref
+                    except TypeError:
+                        ref_key = str(ref)
+            else:
+                ref_key = id(xobj)
+        if ref_key is not None:
+            if ref_key in seen_refs:
+                continue
+            seen_refs.add(ref_key)
+        unique_candidates.append(img_id)
+
+    if len(unique_candidates) == 1:
+        return unique_candidates[0]
+
+    # 2. 从内容流（/Contents）中提取所有 Do 指令的执行顺序
+    do_order = []
+    try:
+        cs = page.get_contents()
+        if cs is not None and hasattr(cs, 'operations'):
+            for operands, operator in cs.operations:
+                op_name = operator.decode('latin1') if isinstance(operator, bytes) else str(operator)
+                if op_name == 'Do' and operands:
+                    target_name = str(operands[0])
+                    do_order.append(target_name)
+    except Exception:
+        do_order = []
+
+    # 3. 收集候选图片的元信息
+    candidate_info = {}
+    for img_id in unique_candidates:
+        w, h = 0, 0
+        has_mask = False
+        xobj = _resolve_pdf_xobject(page, img_id)
+        if xobj is not None:
+            try:
+                w = int(xobj.get('/Width', 0))
+                h = int(xobj.get('/Height', 0))
+            except Exception:
+                pass
+            has_mask = bool(xobj.get('/SMask') or xobj.get('/Mask'))
+        if w == 0 or h == 0:
+            try:
+                img_obj = page.images[img_id]
+                w, h = img_obj.image.size
+            except Exception:
+                pass
+        name_str = str(img_id).lower()
+        candidate_info[img_id] = {
+            'w': w,
+            'h': h,
+            'area': w * h,
+            'has_mask': has_mask,
+            'name': name_str,
+            'xobj': xobj,
+        }
+
+    # 4. 如果内容流中有 Do 调用序列：按照内容流顺序，优先取第一个被绘制且非掩码的图像（最底层）
+    if do_order:
+        for do_name in do_order:
+            clean_do = do_name.lstrip('/')
+            for cand in unique_candidates:
+                clean_cand = str(cand).lstrip('/')
+                if clean_cand == clean_do:
+                    info = candidate_info.get(cand, {})
+                    if not info.get('has_mask', False):
+                        return cand
+
+    # 5. 若内容流无法匹配，或者没有明确顺序：过滤掉遮罩和极小图，选择主版面图
+    max_area = max((info['area'] for info in candidate_info.values()), default=0)
+    valid_candidates = []
+    for cand in unique_candidates:
+        info = candidate_info.get(cand, {})
+        if info.get('has_mask', False):
+            continue
+        if max_area >= 400000 and info.get('area', 0) < max_area * 0.2:
+            continue
+        valid_candidates.append(cand)
+
+    if valid_candidates:
+        return valid_candidates[0]
+
+    return unique_candidates[0]
+
+
+def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, cancel_event=None):
+    """使用 PyMuPDF/fitz 引擎进行全格式（含 JBIG2）无损图像提取，针对多图层严格仅提取最底层图片。"""
+    doc = fitz.open(pdf_path)
+    total_pages = len(doc)
+    if total_pages == 0:
+        return 0, "PDF 中没有有效页面。"
+
+    extracted_count = 0
+    for p_idx, page in enumerate(doc):
+        if cancel_event and cancel_event.is_set():
+            return extracted_count, "已取消提取。"
+        page_num = p_idx + 1
+
+        img_list = page.get_images()
+        if not img_list:
+            continue
+
+        # 物理对象去重（相同 xref 仅保留首次出现）
+        unique_xrefs = []
+        seen = set()
+        for item in img_list:
+            xref = item[0]
+            if xref not in seen and xref > 0:
+                seen.add(xref)
+                unique_xrefs.append(xref)
+
+        if not unique_xrefs:
+            continue
+
+        # 多个图层时仅保留最底层的图片：
+        # 1. 过滤作为 /SMask 遮罩引用的 xref
+        smask_xrefs = {it[1] for it in img_list if len(it) > 1 and it[1] > 0}
+        candidate_xrefs = [x for x in unique_xrefs if x not in smask_xrefs] or unique_xrefs
+        # 2. 多个候选时，若存在大尺寸主版面图，过滤小于 15% 的水印或图章小图
+        if len(candidate_xrefs) > 1:
+            xref_areas = {}
+            for x in candidate_xrefs:
+                try:
+                    meta = doc.extract_image(x)
+                    xref_areas[x] = meta.get("width", 0) * meta.get("height", 0)
+                except Exception:
+                    xref_areas[x] = 0
+            max_a = max(xref_areas.values(), default=0)
+            if max_a >= 400000:
+                filtered = [x for x in candidate_xrefs if xref_areas.get(x, 0) >= max_a * 0.15]
+                if filtered:
+                    candidate_xrefs = filtered
+
+        # 3. 按内容流绘制顺序，首个主图即为画布最底层的底图
+        bottom_xref = candidate_xrefs[0]
+        try:
+            img_info = doc.extract_image(bottom_xref)
+            raw_ext = (img_info.get("ext") or "").lower() if img_info else ""
+            data = None
+            ext = None
+
+            # 针对标准主流图像格式直接使用原始提取数据，保障最高画质与极速提取
+            if raw_ext in ("jpeg", "jpg"):
+                ext = ".jpg"
+                data = img_info.get("image")
+            elif raw_ext == "png":
+                ext = ".png"
+                data = img_info.get("image")
+            elif raw_ext in ("tiff", "tif"):
+                ext = ".tif"
+                data = img_info.get("image")
+                if data:
+                    data = _normalize_extracted_tiff(data)
+            elif raw_ext == "bmp":
+                ext = ".bmp"
+                data = img_info.get("image")
+
+            # 校验 data 是否能被常规图像库/Pillow识别；若不能（如 jb2/jbig2/pam/jpx 等特殊编码或损坏流），
+            # 则使用 PyMuPDF 内置解码器通过 Pixmap 解码为标准无损 PNG
+            need_pixmap = False
+            if not data or not ext:
+                need_pixmap = True
+            else:
+                try:
+                    with Image.open(io.BytesIO(data)) as test_im:
+                        test_im.verify()
+                except Exception:
+                    need_pixmap = True
+
+            if need_pixmap:
+                try:
+                    pix = fitz.Pixmap(doc, bottom_xref)
+                    if pix.n - pix.alpha > 3:  # CMYK 等非 RGB/Gray 颜色空间转换
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+                    data = pix.tobytes("png")
+                    ext = ".png"
+                except Exception:
+                    pass
+
+            if not data or not ext:
+                continue
+
+            # 检查页面视觉旋转角度
+            page_rot = page.rotation
+            if page_rot != 0 and data:
+                data = _apply_image_rotation(data, ext, page_rot, False)
+
+            filename = f"page_{page_num:04d}{ext}"
+            save_path = os.path.join(extract_dir, filename)
+            with open(save_path, "wb") as f:
+                f.write(data)
+            extracted_count += 1
+        except Exception:
+            continue
+
+        if progress_callback:
+            progress_callback(page_num, total_pages, f"正在提取 PDF 原始图片：{page_num} / {total_pages} 页...")
+
+    if extracted_count == 0:
+        return 0, "该 PDF 中未检测到可提取的分页图片（可能为纯文本矢量排版或受保护）。"
+
+    return extracted_count, ""
+
+
+def _extract_images_with_pypdf(pdf_path, extract_dir, progress_callback=None, cancel_event=None):
+    """使用 pypdf 引擎进行原始图片提取，针对多图层严格仅提取最底层图片。"""
     try:
         reader = PdfReader(pdf_path)
     except Exception as e:
@@ -648,7 +934,6 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
     if total_pages == 0:
         return 0, "PDF 中没有有效页面。"
 
-    os.makedirs(extract_dir, exist_ok=True)
     extracted_count = 0
 
     for p_idx, page in enumerate(reader.pages):
@@ -661,7 +946,6 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
         except Exception:
             img_keys = []
 
-        # 兜底：若未获取到 keys，尝试直接从 Resources['/XObject'] 抓取
         if not img_keys:
             try:
                 res = page.get('/Resources')
@@ -679,118 +963,73 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
             except Exception:
                 img_keys = []
 
-        # 启发式：若单页包含多张图片，检查是否存在附加的水印/Logo小图，避免将其提取为独立页面
+        if not img_keys:
+            continue
+
+        # 多图层核心修正：当单页出现多个图层/多张图片时，精准识别并仅保留最底层的图片
         if len(img_keys) > 1:
-            filtered_keys = []
-            img_info_list = []
-            for img_id in img_keys:
-                w, h = 0, 0
-                xobj = _resolve_pdf_xobject(page, img_id)
-                if xobj is not None:
-                    try:
-                        w = int(xobj.get('/Width', 0))
-                        h = int(xobj.get('/Height', 0))
-                    except Exception:
-                        pass
-                if w == 0 or h == 0:
-                    try:
-                        img_obj = page.images[img_id]
-                        w, h = img_obj.image.size
-                    except Exception:
-                        pass
-                name_str = str(img_id).lower()
-                img_info_list.append((img_id, w, h, w * h, name_str, xobj))
+            bottom_key = _select_bottom_layer_image(page, img_keys)
+            img_keys = [bottom_key] if bottom_key else img_keys[:1]
 
-            max_area = max(info[3] for info in img_info_list) if img_info_list else 0
-            if max_area >= 400000:
-                for img_id, w, h, area, name_str, xobj in img_info_list:
-                    if area == max_area:
-                        filtered_keys.append(img_id)
-                        continue
-                    ratio = area / max_area
-                    has_mask = False
-                    if xobj is not None:
-                        has_mask = bool(xobj.get('/SMask') or xobj.get('/Mask'))
-                    is_small = (w < 300 and h < 300) or area < 100000
-                    has_wm_tag = any(sub in name_str for sub in ('logo', 'wm', 'mark', 'icon', 'stamp', 'ad', 'water', 'shuiyin'))
-                    if ratio < 0.15 and (has_mask or is_small or has_wm_tag or ratio < 0.05):
-                        continue
-                    filtered_keys.append(img_id)
-                if filtered_keys:
-                    img_keys = filtered_keys
+        target_img_id = img_keys[0]
 
+        ext = None
+        data = None
+
+        xobj = _resolve_pdf_xobject(page, target_img_id)
+        if xobj is not None:
+            ext, data = _extract_raw_image_from_xobj(xobj)
+
+        if not data:
+            try:
+                img_obj = page.images[target_img_id]
+                ext = os.path.splitext(img_obj.name)[1].lower()
+                data = img_obj.data
+            except Exception:
+                data = None
+
+        if not data:
+            continue
+
+        if not ext or ext not in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2']:
+            ext = '.jpg'
+        if ext == '.jpeg':
+            ext = '.jpg'
+        elif ext == '.tiff':
+            ext = '.tif'
+
+        if ext == '.tif' and data:
+            data = _normalize_extracted_tiff(data)
+
+        # 计算并应用旋转和镜像
         page_rot = _get_page_rotation(page)
         image_transforms = _get_page_image_transforms(page)
+        cm = None
+        if isinstance(target_img_id, (tuple, list)):
+            for candidate in (target_img_id, str(target_img_id), target_img_id[-1], str(target_img_id[-1])):
+                if candidate in image_transforms:
+                    cm = image_transforms[candidate]
+                    break
+        else:
+            cand = str(target_img_id)
+            cm = (
+                image_transforms.get(cand)
+                or image_transforms.get(cand.lstrip('/'))
+                or image_transforms.get('/' + cand)
+            )
 
-        page_extracted = []
-        for img_id in img_keys:
-            if cancel_event and cancel_event.is_set():
-                return extracted_count, "已取消提取。"
+        total_rot_cw, flipped_h = _calculate_image_rotation_and_flip(cm, page_rot)
+        if (total_rot_cw != 0 or flipped_h) and data:
+            data = _apply_image_rotation(data, ext, total_rot_cw, flipped_h)
 
-            ext = None
-            data = None
-
-            # 优先 1：直接从 XObject 解码原始数据流，避免二次重压缩带来的画质与参数损失
-            xobj = _resolve_pdf_xobject(page, img_id)
-            if xobj is not None:
-                ext, data = _extract_raw_image_from_xobj(xobj)
-
-            # 兜底 2：若非标准内嵌图像流（如 Flate 原始栅格位图或行内图片），回退至 pypdf 的无损转换
-            if not data:
-                try:
-                    img_obj = page.images[img_id]
-                    ext = os.path.splitext(img_obj.name)[1].lower()
-                    data = img_obj.data
-                except Exception:
-                    data = None
-
-            if not data:
-                continue
-
-            if not ext or ext not in ['.jpg', '.jpeg', '.png', '.tif', '.tiff', '.bmp', '.jp2']:
-                ext = '.jpg'
-            if ext == '.jpeg':
-                ext = '.jpg'
-            elif ext == '.tiff':
-                ext = '.tif'
-
-            if ext == '.tif' and data:
-                data = _normalize_extracted_tiff(data)
-
-            # 计算该图片在 PDF 中的视觉旋转与镜像翻转状态
-            cm = None
-            if isinstance(img_id, (tuple, list)):
-                for candidate in (img_id, str(img_id), img_id[-1], str(img_id[-1])):
-                    if candidate in image_transforms:
-                        cm = image_transforms[candidate]
-                        break
-            else:
-                cand = str(img_id)
-                cm = (
-                    image_transforms.get(cand)
-                    or image_transforms.get(cand.lstrip('/'))
-                    or image_transforms.get('/' + cand)
-                )
-
-            total_rot_cw, flipped_h = _calculate_image_rotation_and_flip(cm, page_rot)
-            if (total_rot_cw != 0 or flipped_h) and data:
-                data = _apply_image_rotation(data, ext, total_rot_cw, flipped_h)
-
-            page_extracted.append((ext, data))
-
-        total_in_page = len(page_extracted)
-        for sub_idx, (ext, data) in enumerate(page_extracted):
-            if total_in_page == 1:
-                filename = f"page_{page_num:04d}{ext}"
-            else:
-                filename = f"page_{page_num:04d}_{sub_idx+1:02d}{ext}"
-            save_path = os.path.join(extract_dir, filename)
-            try:
-                with open(save_path, 'wb') as f:
-                    f.write(data)
-                extracted_count += 1
-            except Exception as write_err:
-                return extracted_count, f"写入图片失败: {str(write_err)}"
+        filename = f"page_{page_num:04d}{ext}"
+        save_path = os.path.join(extract_dir, filename)
+        try:
+            with open(save_path, 'wb') as f:
+                f.write(data)
+            extracted_count += 1
+        except Exception as write_err:
+            return extracted_count, f"写入图片失败: {str(write_err)}"
 
         if progress_callback:
             progress_callback(page_num, total_pages, f"正在提取 PDF 原始图片：{page_num} / {total_pages} 页...")
@@ -799,6 +1038,27 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
         return 0, "该 PDF 中未检测到可提取的分页图片（可能为纯文本矢量排版或受保护）。"
 
     return extracted_count, ""
+
+
+def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cancel_event=None):
+    """
+    从图片打包型 PDF 中提取所有原始分页图片到指定目录（保持原图质量与参数，不作有损重压缩）。
+    当出现包含多个图层的分页时，精准识别并仅保留最底层的图片（底层原图）。
+    """
+    os.makedirs(extract_dir, exist_ok=True)
+
+    # 优先尝试使用 fitz (PyMuPDF) 引擎：原生支持全格式（含 JBIG2）、解析速度快数十倍且完美支持多图层底层筛选
+    if fitz is not None:
+        try:
+            return _extract_images_with_fitz(pdf_path, extract_dir, progress_callback, cancel_event)
+        except Exception as _fe:
+            print(f"[PDF Extract Warning] PyMuPDF 引擎执行异常: {_fe}，回退至 pypdf 引擎")
+    else:
+        if _fitz_import_error:
+            print(f"[PDF Extract Notice] 未加载 PyMuPDF 引擎 ({_fitz_import_error})，回退至 pypdf 引擎")
+
+    # 回退引擎：使用 pypdf 提取
+    return _extract_images_with_pypdf(pdf_path, extract_dir, progress_callback, cancel_event)
 
 
 def get_task_suffix(enable_crop, enable_binarize, size_opt_mode='original'):
