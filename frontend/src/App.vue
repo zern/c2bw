@@ -821,27 +821,51 @@ function changeLanguage(lang) {
   }
 }
 
+// 规范化并比对版本号，支持形如 "4.0", "v4.0", "4.0.0.0", "v4.0.1" 等格式
+function parseVersionParts(ver) {
+  if (!ver) return [0]
+  const cleaned = String(ver).trim().replace(/^[vV]/, '').trim()
+  const parts = cleaned.split('.').map(p => {
+    const digits = p.replace(/\D/g, '')
+    const num = parseInt(digits, 10)
+    return isNaN(num) ? 0 : num
+  })
+  while (parts.length > 1 && parts[parts.length - 1] === 0) {
+    parts.pop()
+  }
+  return parts.length ? parts : [0]
+}
+
+function compareVersions(current, latest) {
+  const a = parseVersionParts(current)
+  const b = parseVersionParts(latest)
+  const maxLen = Math.max(a.length, b.length)
+  for (let i = 0; i < maxLen; i++) {
+    const av = a[i] || 0
+    const bv = b[i] || 0
+    if (av !== bv) return av < bv ? -1 : 1
+  }
+  return 0
+}
+
 // 检查更新
 async function checkForUpdates() {
   try {
     const result = await callApi('get_update_info')
     if (result && result.ok && result.update && result.update.version) {
       updateInfo.value = result.update
-      updateAvailable.value = compareVersions(result.current_version, result.update.version) < 0
+      // 优先以后端精确比对的 has_update 为准，同时结合前端稳健对比
+      if (typeof result.has_update === 'boolean') {
+        updateAvailable.value = result.has_update
+      } else {
+        updateAvailable.value = compareVersions(result.current_version || '4.0.0.0', result.update.version) < 0
+      }
+    } else {
+      updateAvailable.value = false
     }
-  } catch (e) {}
-}
-
-function compareVersions(current, latest) {
-  const a = String(current || '0').split('.')
-  const b = String(latest || '0').split('.')
-  const length = Math.max(a.length, b.length)
-  for (let i = 0; i < length; i++) {
-    const av = parseInt(a[i] || '0', 10) || 0
-    const bv = parseInt(b[i] || '0', 10) || 0
-    if (av !== bv) return av < bv ? -1 : 1
+  } catch (e) {
+    updateAvailable.value = false
   }
-  return 0
 }
 
 async function downloadUpdate() {

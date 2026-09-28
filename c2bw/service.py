@@ -49,6 +49,37 @@ QUIT_CONFIRMATIONS = {
 }
 
 UPDATE_INFO_URL = 'https://tools.hanjihebi.com/aisoft/c2bw_update.json'
+CURRENT_VERSION = '4.0.0.0'
+CURRENT_VERSION_NAME = '4.0'
+
+
+def parse_version_tuple(ver_str):
+    """将版本字符串解析为整型元组并剥离末尾连续的0，支持形如 '4.0', '4.0.0.0', 'v4.0' 等。"""
+    if not ver_str:
+        return (0,)
+    cleaned = str(ver_str).strip().lstrip('vV').strip()
+    parts = []
+    for item in cleaned.split('.'):
+        digits = ''.join(ch for ch in item if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) > 1 and parts[-1] == 0:
+        parts.pop()
+    return tuple(parts) if parts else (0,)
+
+
+def compare_versions(ver1, ver2):
+    """比较两个版本号：ver1 < ver2 返回 -1；ver1 > ver2 返回 1；相等返回 0。"""
+    t1 = list(parse_version_tuple(ver1))
+    t2 = list(parse_version_tuple(ver2))
+    max_len = max(len(t1), len(t2))
+    t1.extend([0] * (max_len - len(t1)))
+    t2.extend([0] * (max_len - len(t2)))
+    for a, b in zip(t1, t2):
+        if a < b:
+            return -1
+        if a > b:
+            return 1
+    return 0
 
 
 def get_config_dir():
@@ -123,6 +154,8 @@ class ImageProcessorService:
     """供 Web UI / Pywebview 及 RPC 调用的线程安全核心业务服务。"""
 
     UPDATE_INFO_URL = UPDATE_INFO_URL
+    CURRENT_VERSION = CURRENT_VERSION
+    CURRENT_VERSION_NAME = CURRENT_VERSION_NAME
     PDF_APPLICATION_NAME = PDF_APPLICATION_NAME
     PDF_SPEC_VERSION = PDF_SPEC_VERSION
 
@@ -150,15 +183,29 @@ class ImageProcessorService:
         try:
             request = urllib.request.Request(
                 self.UPDATE_INFO_URL,
-                headers={'User-Agent': 'SHUGE-C2BW/3.9'},
+                headers={'User-Agent': f'SHUGE-C2BW/{self.CURRENT_VERSION_NAME}'},
             )
             with urllib.request.urlopen(request, timeout=5) as response:
                 data = json.loads(response.read().decode('utf-8-sig'))
             if not isinstance(data, dict) or not data.get('version'):
                 raise ValueError('服务器返回的更新信息格式无效。')
-            return {'ok': True, 'current_version': '3.9.0.0', 'update': data, 'source': 'server'}
+            remote_ver = str(data.get('version', '')).strip()
+            has_update = compare_versions(self.CURRENT_VERSION, remote_ver) < 0
+            return {
+                'ok': True,
+                'current_version': self.CURRENT_VERSION,
+                'current_version_name': self.CURRENT_VERSION_NAME,
+                'has_update': has_update,
+                'update': data,
+                'source': 'server',
+            }
         except Exception:
-            return {'ok': False, 'current_version': '3.9.0.0'}
+            return {
+                'ok': False,
+                'current_version': self.CURRENT_VERSION,
+                'current_version_name': self.CURRENT_VERSION_NAME,
+                'has_update': False,
+            }
 
     def open_download_url(self, url):
         try:
@@ -1344,6 +1391,10 @@ __all__ = [
     'APP_TITLES',
     'QUIT_CONFIRMATIONS',
     'UPDATE_INFO_URL',
+    'CURRENT_VERSION',
+    'CURRENT_VERSION_NAME',
+    'parse_version_tuple',
+    'compare_versions',
     'get_config_dir',
     'get_config_path',
     'load_user_config',
