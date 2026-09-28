@@ -906,6 +906,19 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                             pix = fitz.Pixmap(fitz.csRGB, pix)
                         data = pix.tobytes("png")
                         ext = ".png"
+                        if data:
+                            try:
+                                with Image.open(io.BytesIO(data)) as p_im:
+                                    if p_im.mode == 'L':
+                                        c_list = p_im.getcolors(2)
+                                        if c_list and len(c_list) <= 2:
+                                            vals = {c[1] for c in c_list}
+                                            if vals.issubset({0, 255}):
+                                                bio_1 = io.BytesIO()
+                                                p_im.convert('1').save(bio_1, format='PNG')
+                                                data = bio_1.getvalue()
+                            except Exception:
+                                pass
                     except Exception:
                         pass
 
@@ -2348,7 +2361,41 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
             width_pt = min(14400.0, width_pt * scale)
             height_pt = min(14400.0, height_pt * scale)
 
-        is_bilevel = (im.mode == '1') or (im.format == 'TIFF' and im.tag_v2.get(259) == 4)
+        is_bilevel = (im.mode == '1') or (im.format == 'TIFF' and getattr(im, 'tag_v2', {}).get(259) == 4)
+        if not is_bilevel:
+            try:
+                if im.mode == 'L':
+                    colors = im.getcolors(2)
+                    if colors and len(colors) <= 2:
+                        vals = {c[1] for c in colors}
+                        if vals.issubset({0, 255}):
+                            is_bilevel = True
+                        elif vals.issubset({0, 1}):
+                            im = im.point(lambda p: 255 if p else 0, mode='1')
+                            is_bilevel = True
+                elif im.mode == 'P':
+                    colors = im.getcolors(2)
+                    if colors and len(colors) <= 2:
+                        im_l = im.convert('L')
+                        l_colors = im_l.getcolors(2)
+                        if l_colors and len(l_colors) <= 2:
+                            vals = {c[1] for c in l_colors}
+                            if vals.issubset({0, 255}):
+                                im = im_l
+                                is_bilevel = True
+                            elif vals.issubset({0, 1}):
+                                im = im_l.point(lambda p: 255 if p else 0, mode='1')
+                                is_bilevel = True
+                elif im.mode == 'RGB':
+                    colors = im.getcolors(2)
+                    if colors and len(colors) <= 2:
+                        vals = {c[1] for c in colors}
+                        if vals.issubset({(0, 0, 0), (255, 255, 255)}):
+                            im = im.convert('1')
+                            is_bilevel = True
+            except Exception:
+                pass
+
         if is_bilevel:
             # 1 位黑白二值图：必须严格使用 1 位 TIFF Group 4 (Filter /CCITTFaxDecode) 封装
             if im.mode != '1':
