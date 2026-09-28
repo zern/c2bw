@@ -12,16 +12,6 @@ pythonnet_dir = os.path.dirname(pythonnet.__file__)
 os.environ['PATH'] = os.getcwd() + os.pathsep + os.environ.get('PATH', '')
 
 try:
-    mupdf_datas, mupdf_binaries, mupdf_hidden = collect_all('pymupdf')
-except Exception:
-    mupdf_datas, mupdf_binaries, mupdf_hidden = [], [], []
-
-try:
-    fitz_datas, fitz_binaries, fitz_hidden = collect_all('fitz')
-except Exception:
-    fitz_datas, fitz_binaries, fitz_hidden = [], [], []
-
-try:
     import pymupdf
     pymupdf_dir = os.path.dirname(pymupdf.__file__)
     site_packages_dir = os.path.dirname(pymupdf_dir)
@@ -29,33 +19,34 @@ try:
 except Exception:
     pymupdf_dir, fitz_dir = None, None
 
-extra_datas = []
-if pymupdf_dir and os.path.exists(pymupdf_dir):
-    extra_datas.append((pymupdf_dir, 'pymupdf'))
-if fitz_dir and os.path.exists(fitz_dir):
-    extra_datas.append((fitz_dir, 'fitz'))
-
-extra_binaries = []
-py3_dll = r"C:\Program Files\python\python3.dll"
-if os.path.exists(py3_dll):
-    extra_binaries.append((py3_dll, '.'))
-    extra_binaries.append((py3_dll, 'pymupdf'))
-
-if pymupdf_dir:
-    for f in os.listdir(pymupdf_dir):
-        if f.lower().endswith(('.dll', '.pyd')):
-            fp = os.path.join(pymupdf_dir, f)
-            extra_binaries.append((fp, '.'))
-            extra_binaries.append((fp, 'pymupdf'))
-
 added_datas = [
     ('webui', 'webui'),
     ('hanji.ico', '.'),
     (os.path.join(pythonnet_dir, 'runtime'), 'pythonnet/runtime'),
     (os.path.join(clr_loader_dir, 'ffi', 'dlls'), 'clr_loader/ffi/dlls'),
-] + mupdf_datas + fitz_datas + extra_datas
+]
 
-added_binaries = mupdf_binaries + fitz_binaries + extra_binaries
+added_binaries = []
+py3_dll = r"C:\Program Files\python\python3.dll"
+if os.path.exists(py3_dll):
+    added_binaries.append((py3_dll, '.'))
+
+# 严禁重复打包：精准收集 pymupdf 中的二进制库与 Python 模块
+if pymupdf_dir and os.path.exists(pymupdf_dir):
+    for f in os.listdir(pymupdf_dir):
+        fp = os.path.join(pymupdf_dir, f)
+        if os.path.isfile(fp):
+            if f.lower().endswith(('.dll', '.pyd')):
+                added_binaries.append((fp, 'pymupdf'))
+            elif f.lower().endswith('.py'):
+                added_datas.append((fp, 'pymupdf'))
+
+# 精准收集 fitz 中的 Python 模块
+if fitz_dir and os.path.exists(fitz_dir):
+    for f in os.listdir(fitz_dir):
+        fp = os.path.join(fitz_dir, f)
+        if os.path.isfile(fp) and f.lower().endswith('.py'):
+            added_datas.append((fp, 'fitz'))
 
 a = Analysis(
     ['run_c2bw.py'],
@@ -84,7 +75,7 @@ a = Analysis(
         'win32com',
         'win32com.client',
         'pythoncom',
-    ] + mupdf_hidden + fitz_hidden,
+    ],
     hookspath=[],
     excludes=[
         'pkg_resources',
@@ -125,6 +116,28 @@ a = Analysis(
     cipher=None,
     noarchive=False,
 )
+
+# 过滤并去重 a.binaries 与 a.datas，确保每个源文件（尤其是 21MB 的 mupdfcpp64.dll）绝不重复打包
+seen_sources = set()
+unique_binaries = []
+for item in a.binaries:
+    target, src, type_ = item
+    src_norm = os.path.normcase(os.path.realpath(os.path.abspath(src)))
+    if src_norm not in seen_sources:
+        seen_sources.add(src_norm)
+        unique_binaries.append(item)
+a.binaries = unique_binaries
+
+seen_data_sources = set()
+unique_datas = []
+for item in a.datas:
+    target, src, type_ = item
+    src_norm = os.path.normcase(os.path.realpath(os.path.abspath(src)))
+    if src_norm not in seen_data_sources:
+        seen_data_sources.add(src_norm)
+        unique_datas.append(item)
+a.datas = unique_datas
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=None)
 
 exe = EXE(
