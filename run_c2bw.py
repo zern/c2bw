@@ -30,13 +30,14 @@ def _setup_bundle_environment():
     # 4. 可执行文件同级目录
     bundle_dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
     
-    # 5. TEMP 扫描保底
-    temp_dir = os.environ.get('TEMP')
-    if temp_dir and os.path.exists(temp_dir):
-        import glob
-        matches = sorted(glob.glob(os.path.join(temp_dir, 'onefile_*')), key=os.path.getmtime, reverse=True)
-        for m in matches:
-            bundle_dirs.append(m)
+    # 5. TEMP 扫描保底：仅当未获得有效解压目录时作为后备，且仅取最新的单个目录
+    if not os.environ.get("NUITKA_ONEFILE_DIRECTORY") and not hasattr(sys, '_MEIPASS'):
+        temp_dir = os.environ.get('TEMP')
+        if temp_dir and os.path.exists(temp_dir):
+            import glob
+            matches = sorted(glob.glob(os.path.join(temp_dir, 'onefile_*')), key=os.path.getmtime, reverse=True)
+            if matches:
+                bundle_dirs.append(matches[0])
 
     for _bdir in bundle_dirs:
         if _bdir and os.path.exists(_bdir):

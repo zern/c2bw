@@ -1219,6 +1219,8 @@ class ImageProcessorService:
                 if os.path.isfile(full_path) and os.path.splitext(file)[1].lower() in valid_exts:
                     tasks.append((full_path, file, file))
 
+        tasks.sort(key=lambda t: natural_sort_key(t[0]))
+
         total_files = len(tasks)
         if total_files == 0:
             self.ui_events.put(('finish', get_backend_text('err_no_images_in_pdf', lang)))
