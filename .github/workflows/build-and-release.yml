@@ -83,76 +83,15 @@ jobs:
         run: |
           python -m pip install --upgrade "pip<24.1" "setuptools<60.7" "wheel<0.46"
           python -m pip install -r requirements-win7.txt "pywin32<=306" nuitka zstandard
-          $dll = python -c "import os, pythonnet; print(os.path.join(os.path.dirname(pythonnet.__file__), 'runtime', 'Python.Runtime.dll'))"
-          if (Test-Path $dll) { Copy-Item $dll . -Force }
-          $pynetDir = python -c "import pythonnet, os; print(os.path.dirname(pythonnet.__file__))"
-          $clrDir = python -c "import clr_loader, os; print(os.path.dirname(clr_loader.__file__))"
-          $mupdfDir = python -c "import pymupdf, os; print(os.path.dirname(pymupdf.__file__))"
-          $fitzDir = python -c "import fitz, os; print(os.path.dirname(fitz.__file__))"
-          $pyDll = python -c "import sys, os; print(os.path.join(sys.prefix, 'python3.dll'))"
-
-          $extraDataArgs = @(
-            "--include-data-dir=${pynetDir}\runtime=pythonnet/runtime",
-            "--include-data-dir=${clrDir}\ffi\dlls=clr_loader/ffi/dlls",
-            "--include-data-files=${mupdfDir}\*.*=pymupdf/",
-            "--include-data-files=${fitzDir}\*.*=fitz/"
-          )
-
-          $verFlags = python get_version_info.py --nuitka-flags
-          python -m nuitka $verFlags `
-            --standalone `
-            --onefile `
-            --windows-console-mode=disable `
-            --windows-icon-from-ico=hanji.ico `
-            --include-data-dir=webui=webui `
-            --include-data-file=hanji.ico=hanji.ico `
-            $extraDataArgs `
-            --nofollow-import-to=fitz `
-            --nofollow-import-to=pymupdf `
-            --no-deployment-flag=excluded-module-usage `
-            --enable-plugin=tk-inter `
-            --nofollow-import-to=jinja2 `
-            --nofollow-import-to=markupsafe `
-            --nofollow-import-to=mako `
-            --nofollow-import-to=cryptography `
-            --nofollow-import-to=Crypto `
-            --nofollow-import-to=bcrypt `
-            --nofollow-import-to=gevent `
-            --nofollow-import-to=greenlet `
-            --nofollow-import-to=zope `
-            --nofollow-import-to=psutil `
-            --nofollow-import-to=scipy `
-            --nofollow-import-to=matplotlib `
-            --nofollow-import-to=pandas `
-            --nofollow-import-to=sqlite3 `
-            --nofollow-import-to=unittest `
-            --nofollow-import-to=pytest `
-            --nofollow-import-to=doctest `
-            --nofollow-import-to=test `
-            --nofollow-import-to=distutils `
-            --nofollow-import-to=setuptools `
-            --nofollow-import-to=pkg_resources `
-            --nofollow-import-to=pip `
-            --nofollow-import-to=win32ui `
-            --nofollow-import-to=Pythonwin `
-            --nofollow-import-to=IPython `
-            --nofollow-import-to=pydoc `
-            --nofollow-import-to=difflib `
-            --nofollow-import-to=lib2to3 `
-            --nofollow-import-to=idlelib `
-            --nofollow-import-to=turtle `
-            --nofollow-import-to=turtledemo `
-            --output-dir=dist_nuitka `
-            --output-filename=c2bw_nuitka.exe `
-            --assume-yes-for-downloads `
-            run_c2bw.py
-          if (Test-Path "Python.Runtime.dll") { Remove-Item "Python.Runtime.dll" -Force }
+          python build_nuitka_windows.py
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           python finalize_build.py nuitka
           $builtNuitkaExe = Get-ChildItem dist -Filter "智能图像预处理工具 v*.exe" | Where-Object { $_.Name -notmatch "_Win7" } | Select-Object -First 1
           if (-not $builtNuitkaExe) {
             throw "Windows Nuitka build executable not found in dist/"
           }
+          Write-Host "Verifying Windows Nuitka VersionInfo:"
+          (Get-Item $builtNuitkaExe.FullName).VersionInfo | Format-List *
 
       # 2. 构建 Windows 7 专用独立版 (Python 3.8 + pythonnet)
       - name: Build Windows 7 executable
@@ -167,6 +106,8 @@ jobs:
           if (-not $builtWin7Exe) {
             throw "Windows 7 build executable not found in dist/"
           }
+          Write-Host "Verifying Windows 7 VersionInfo:"
+          (Get-Item $builtWin7Exe.FullName).VersionInfo | Format-List *
 
       - name: Generate Windows Checksums
         shell: pwsh

@@ -34,63 +34,7 @@ echo ==========================================================
 set "NO_PROXY=*"
 set "no_proxy=*"
 
-"%PYTHON_EXE%" -m nuitka ^
-    --standalone ^
-    --onefile ^
-    --windows-console-mode=disable ^
-    --windows-icon-from-ico=hanji.ico ^
-    --company-name="漢籍合璧" ^
-    --product-name="智能图像预处理工具 v4.1" ^
-    --file-version=4.1.0.0 ^
-    --product-version=4.1.0.0 ^
-    --file-description="智能图像预处理工具 v4.1" ^
-    --copyright="By weiceng © 漢籍合璧" ^
-    --include-data-dir=webui=webui ^
-    --include-data-file=hanji.ico=hanji.ico ^
-    --include-data-dir="%APPDATA%\Python\Python38\site-packages\pythonnet\runtime"=pythonnet/runtime ^
-    --include-data-dir="%APPDATA%\Python\Python38\site-packages\clr_loader\ffi\dlls"=clr_loader/ffi/dlls ^
-    --include-data-files="%APPDATA%\Python\Python38\site-packages\pymupdf\*.*=pymupdf/" ^
-    --include-data-files="%APPDATA%\Python\Python38\site-packages\fitz\*.*=fitz/" ^
-    --include-data-files="C:\Program Files\python\python3.dll=python3.dll" ^
-    --nofollow-import-to=fitz ^
-    --nofollow-import-to=pymupdf ^
-    --no-deployment-flag=excluded-module-usage ^
-    --enable-plugin=tk-inter ^
-    --nofollow-import-to=jinja2 ^
-    --nofollow-import-to=markupsafe ^
-    --nofollow-import-to=mako ^
-    --nofollow-import-to=cryptography ^
-    --nofollow-import-to=Crypto ^
-    --nofollow-import-to=bcrypt ^
-    --nofollow-import-to=gevent ^
-    --nofollow-import-to=greenlet ^
-    --nofollow-import-to=zope ^
-    --nofollow-import-to=psutil ^
-    --nofollow-import-to=scipy ^
-    --nofollow-import-to=matplotlib ^
-    --nofollow-import-to=pandas ^
-    --nofollow-import-to=sqlite3 ^
-    --nofollow-import-to=unittest ^
-    --nofollow-import-to=pytest ^
-    --nofollow-import-to=doctest ^
-    --nofollow-import-to=test ^
-    --nofollow-import-to=distutils ^
-    --nofollow-import-to=setuptools ^
-    --nofollow-import-to=pkg_resources ^
-    --nofollow-import-to=pip ^
-    --nofollow-import-to=win32ui ^
-    --nofollow-import-to=Pythonwin ^
-    --nofollow-import-to=IPython ^
-    --nofollow-import-to=pydoc ^
-    --nofollow-import-to=difflib ^
-    --nofollow-import-to=lib2to3 ^
-    --nofollow-import-to=idlelib ^
-    --nofollow-import-to=turtle ^
-    --nofollow-import-to=turtledemo ^
-    --output-dir=dist_nuitka ^
-    --output-filename=c2bw_nuitka.exe ^
-    --assume-yes-for-downloads ^
-    run_c2bw.py
+"%PYTHON_EXE%" build_nuitka_windows.py
 
 set BUILD_ERR=%ERRORLEVEL%
 if exist "Python.Runtime.dll" del /f /q "Python.Runtime.dll" >nul 2>&1

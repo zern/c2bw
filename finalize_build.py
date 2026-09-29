@@ -47,6 +47,23 @@ for t in targets:
             shutil.copyfile(src, dst)
             try:
                 print(f"Generated: {dst} ({os.path.getsize(dst)} bytes)")
+                if sys.platform == "win32" and dst.lower().endswith(".exe"):
+                    try:
+                        import ctypes
+                        from ctypes import wintypes
+                        size = ctypes.windll.version.GetFileVersionInfoSizeW(dst, None)
+                        if size > 0:
+                            buf = ctypes.create_string_buffer(size)
+                            if ctypes.windll.version.GetFileVersionInfoW(dst, 0, size, buf):
+                                for key in ["FileDescription", "FileVersion", "ProductName", "ProductVersion", "CompanyName", "LegalCopyright"]:
+                                    for lang in ["000004b0", "080404b0", "040904b0"]:
+                                        val_ptr = ctypes.c_void_p()
+                                        val_len = wintypes.UINT()
+                                        if ctypes.windll.version.VerQueryValueW(buf, f"\\StringFileInfo\\{lang}\\{key}", ctypes.byref(val_ptr), ctypes.byref(val_len)) and val_len.value > 0:
+                                            print(f"  * {key}: {ctypes.wstring_at(val_ptr.value)}")
+                                            break
+                    except Exception as ve:
+                        print(f"  * Version check warning: {ve}")
             except Exception:
                 pass
             break
