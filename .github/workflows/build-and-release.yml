@@ -97,15 +97,6 @@ jobs:
             "--include-data-files=${mupdfDir}\*.*=pymupdf/",
             "--include-data-files=${fitzDir}\*.*=fitz/"
           )
-          if (Test-Path $pyDll) {
-            $extraDataArgs += "--include-data-files=${pyDll}=python3.dll"
-          }
-          if (Test-Path "C:\Windows\System32\msvcp140.dll") {
-            $extraDataArgs += "--include-data-files=C:\Windows\System32\msvcp140.dll=msvcp140.dll"
-          }
-          if (Test-Path "C:\Windows\System32\vcruntime140_1.dll") {
-            $extraDataArgs += "--include-data-files=C:\Windows\System32\vcruntime140_1.dll=vcruntime140_1.dll"
-          }
 
           $verFlags = python get_version_info.py --nuitka-flags
           python -m nuitka $verFlags `

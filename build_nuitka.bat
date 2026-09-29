@@ -52,8 +52,6 @@ set "no_proxy=*"
     --include-data-files="%APPDATA%\Python\Python38\site-packages\pymupdf\*.*=pymupdf/" ^
     --include-data-files="%APPDATA%\Python\Python38\site-packages\fitz\*.*=fitz/" ^
     --include-data-files="C:\Program Files\python\python3.dll=python3.dll" ^
-    --include-data-files="C:\Windows\System32\msvcp140.dll=msvcp140.dll" ^
-    --include-data-files="C:\Windows\System32\vcruntime140_1.dll=vcruntime140_1.dll" ^
     --nofollow-import-to=fitz ^
     --nofollow-import-to=pymupdf ^
     --no-deployment-flag=excluded-module-usage ^
