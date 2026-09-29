@@ -2,6 +2,7 @@
 # 兼容 Windows 7 (CPython 3.8 x64) 的独立单文件打包配置。
 
 import os
+import sys
 import clr_loader
 import pythonnet
 
