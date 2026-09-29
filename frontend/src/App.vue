@@ -22,6 +22,46 @@
         <p>{{ t('appSubtitle') }}</p>
       </div>
       <div class="header-right">
+        <!-- 微信捐赠按钮与弹窗 -->
+        <el-popover
+          placement="bottom-end"
+          :width="260"
+          trigger="click"
+          popper-class="wechat-donate-popover"
+        >
+          <template #reference>
+            <button
+              type="button"
+              class="donate-link"
+              :title="t('wechatDonateTitle')"
+            >
+              <svg class="wechat-icon" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M8.691 2.188C3.891 2.188 0 5.478 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.294.295a.326.326 0 0 0 .167-.052l1.908-1.103a.604.604 0 0 1 .521-.064c1.004.301 2.083.468 3.204.468.17 0 .339-.004.507-.013a7.127 7.127 0 0 1-.225-1.766c0-4.053 3.89-7.343 8.69-7.343.344 0 .683.018 1.017.051C17.708 5.163 13.528 2.188 8.691 2.188zm-2.58 4.24a1.087 1.087 0 1 1 0 2.174 1.087 1.087 0 0 1 0-2.174zm5.16 0a1.087 1.087 0 1 1 0 2.174 1.087 1.087 0 0 1 0-2.174zM15.309 8.71c-4.106 0-7.435 2.768-7.435 6.183 0 1.868.99 3.547 2.535 4.683a.498.498 0 0 1 .18.561l-.33 1.25c-.016.059-.04.119-.04.18 0 .138.11.249.248.249a.276.276 0 0 0 .141-.044l1.611-.931a.51.51 0 0 1 .44-.054c.848.254 1.76.395 2.71.395 4.107 0 7.436-2.768 7.436-6.183 0-3.415-3.329-6.183-7.436-6.183zm-2.174 3.58a.919.919 0 1 1 0 1.838.919.919 0 0 1 0-1.838zm4.348 0a.919.919 0 1 1 0 1.838.919.919 0 0 1 0-1.838z"/>
+              </svg>
+              <span>{{ t('wechatDonate') }}</span>
+            </button>
+          </template>
+          <div class="donate-popover-content">
+            <div class="donate-header">
+              <svg class="wechat-icon-green" viewBox="0 0 24 24" fill="#07c160" width="16" height="16">
+                <path d="M8.691 2.188C3.891 2.188 0 5.478 0 9.53c0 2.212 1.17 4.203 3.002 5.55a.59.59 0 0 1 .213.665l-.39 1.48c-.019.07-.048.141-.048.213 0 .163.13.295.294.295a.326.326 0 0 0 .167-.052l1.908-1.103a.604.604 0 0 1 .521-.064c1.004.301 2.083.468 3.204.468.17 0 .339-.004.507-.013a7.127 7.127 0 0 1-.225-1.766c0-4.053 3.89-7.343 8.69-7.343.344 0 .683.018 1.017.051C17.708 5.163 13.528 2.188 8.691 2.188zm-2.58 4.24a1.087 1.087 0 1 1 0 2.174 1.087 1.087 0 0 1 0-2.174zm5.16 0a1.087 1.087 0 1 1 0 2.174 1.087 1.087 0 0 1 0-2.174zM15.309 8.71c-4.106 0-7.435 2.768-7.435 6.183 0 1.868.99 3.547 2.535 4.683a.498.498 0 0 1 .18.561l-.33 1.25c-.016.059-.04.119-.04.18 0 .138.11.249.248.249a.276.276 0 0 0 .141-.044l1.611-.931a.51.51 0 0 1 .44-.054c.848.254 1.76.395 2.71.395 4.107 0 7.436-2.768 7.436-6.183 0-3.415-3.329-6.183-7.436-6.183zm-2.174 3.58a.919.919 0 1 1 0 1.838.919.919 0 0 1 0-1.838zm4.348 0a.919.919 0 1 1 0 1.838.919.919 0 0 1 0-1.838z"/>
+              </svg>
+              <span>{{ t('wechatDonateTitle') }}</span>
+            </div>
+            <div class="donate-image-box">
+              <el-image
+                :src="wechatpayImg"
+                :preview-src-list="[wechatpayImg]"
+                fit="contain"
+                class="donate-qr-img"
+                loading="lazy"
+                title="点击可放大查看"
+              />
+            </div>
+            <div class="donate-desc-text">{{ t('wechatDonateDesc') }}</div>
+          </div>
+        </el-popover>
+
         <!-- 项目 GitHub 链接 -->
         <a
           class="github-link"
@@ -656,6 +696,7 @@ import {
 } from '@element-plus/icons-vue'
 import { useI18n } from './locales/i18n.js'
 import { isBridgeReady, initBridge, callApi } from './api/bridge.js'
+import wechatpayImg from './assets/wechatpay.jpg'
 
 const { currentLang, currentLanguageLabel, supportedLanguages, t, setLanguage } = useI18n()
 
