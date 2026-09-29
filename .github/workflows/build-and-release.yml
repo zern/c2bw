@@ -85,6 +85,28 @@ jobs:
           python -m pip install -r requirements-win7.txt "pywin32<=306" nuitka zstandard
           $dll = python -c "import os, pythonnet; print(os.path.join(os.path.dirname(pythonnet.__file__), 'runtime', 'Python.Runtime.dll'))"
           if (Test-Path $dll) { Copy-Item $dll . -Force }
+          $pynetDir = python -c "import pythonnet, os; print(os.path.dirname(pythonnet.__file__))"
+          $clrDir = python -c "import clr_loader, os; print(os.path.dirname(clr_loader.__file__))"
+          $mupdfDir = python -c "import pymupdf, os; print(os.path.dirname(pymupdf.__file__))"
+          $fitzDir = python -c "import fitz, os; print(os.path.dirname(fitz.__file__))"
+          $pyDll = python -c "import sys, os; print(os.path.join(sys.prefix, 'python3.dll'))"
+
+          $extraDataArgs = @(
+            "--include-data-dir=${pynetDir}\runtime=pythonnet/runtime",
+            "--include-data-dir=${clrDir}\ffi\dlls=clr_loader/ffi/dlls",
+            "--include-data-files=${mupdfDir}\*.*=pymupdf/",
+            "--include-data-files=${fitzDir}\*.*=fitz/"
+          )
+          if (Test-Path $pyDll) {
+            $extraDataArgs += "--include-data-files=${pyDll}=python3.dll"
+          }
+          if (Test-Path "C:\Windows\System32\msvcp140.dll") {
+            $extraDataArgs += "--include-data-files=C:\Windows\System32\msvcp140.dll=msvcp140.dll"
+          }
+          if (Test-Path "C:\Windows\System32\vcruntime140_1.dll") {
+            $extraDataArgs += "--include-data-files=C:\Windows\System32\vcruntime140_1.dll=vcruntime140_1.dll"
+          }
+
           $verFlags = python get_version_info.py --nuitka-flags
           python -m nuitka $verFlags `
             --standalone `
@@ -93,8 +115,10 @@ jobs:
             --windows-icon-from-ico=hanji.ico `
             --include-data-dir=webui=webui `
             --include-data-file=hanji.ico=hanji.ico `
-            --include-package=pymupdf `
-            --include-package=fitz `
+            $extraDataArgs `
+            --nofollow-import-to=fitz `
+            --nofollow-import-to=pymupdf `
+            --no-deployment-flag=excluded-module-usage `
             --enable-plugin=tk-inter `
             --nofollow-import-to=jinja2 `
             --nofollow-import-to=markupsafe `

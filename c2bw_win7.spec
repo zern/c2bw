@@ -27,7 +27,9 @@ added_datas = [
 ]
 
 added_binaries = []
-py3_dll = r"C:\Program Files\python\python3.dll"
+py3_dll = os.path.join(sys.prefix, 'python3.dll')
+if not os.path.exists(py3_dll):
+    py3_dll = r"C:\Program Files\python\python3.dll"
 if os.path.exists(py3_dll):
     added_binaries.append((py3_dll, '.'))
 

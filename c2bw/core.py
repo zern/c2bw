@@ -2445,6 +2445,7 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
                     NameObject('/Columns'): NumberObject(w),
                     NameObject('/Rows'): NumberObject(h),
                     NameObject('/BlackIs1'): BooleanObject(True),
+                    NameObject('/EndOfBlock'): BooleanObject(False),
                 }),
             })
         elif ext in ('.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c'):
