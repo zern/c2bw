@@ -887,16 +887,12 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                     ext = ".bmp"
                     data = img_info.get("image")
 
-                # 校验 data 是否能被常规图像库/Pillow识别；若不能（如 jb2/jbig2/pam/jpx 等特殊编码或损坏流），
-                # 则使用 PyMuPDF 内置解码器通过 Pixmap 解码为标准无损 PNG
-                need_pixmap = False
-                if not data or not ext:
-                    need_pixmap = True
-                else:
-                    try:
-                        with Image.open(io.BytesIO(data)) as test_im:
-                            test_im.verify()
-                    except Exception:
+                # 极速轻量合法性校验：仅当缺少有效数据或头部异常时才触发 Pixmap 渲染解码
+                need_pixmap = not (data and ext)
+                if not need_pixmap:
+                    if ext == ".jpg" and not data.startswith(b'\xff\xd8'):
+                        need_pixmap = True
+                    elif ext == ".png" and not data.startswith(b'\x89PNG'):
                         need_pixmap = True
 
                 if need_pixmap:
@@ -904,21 +900,9 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                         pix = fitz.Pixmap(doc, bottom_xref)
                         if pix.n - pix.alpha > 3:  # CMYK 等非 RGB/Gray 颜色空间转换
                             pix = fitz.Pixmap(fitz.csRGB, pix)
+                        # 直接输出标准无损 PNG 字节流（C++原生极速压缩，避免二次重解压与二次重压缩）
                         data = pix.tobytes("png")
                         ext = ".png"
-                        if data:
-                            try:
-                                with Image.open(io.BytesIO(data)) as p_im:
-                                    if p_im.mode == 'L':
-                                        c_list = p_im.getcolors(2)
-                                        if c_list and len(c_list) <= 2:
-                                            vals = {c[1] for c in c_list}
-                                            if vals.issubset({0, 255}):
-                                                bio_1 = io.BytesIO()
-                                                p_im.convert('1').save(bio_1, format='PNG')
-                                                data = bio_1.getvalue()
-                            except Exception:
-                                pass
                     except Exception:
                         pass
 
@@ -2361,40 +2345,37 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
             width_pt = min(14400.0, width_pt * scale)
             height_pt = min(14400.0, height_pt * scale)
 
-        is_bilevel = (im.mode == '1') or (im.format == 'TIFF' and getattr(im, 'tag_v2', {}).get(259) == 4)
-        if not is_bilevel:
-            try:
-                if im.mode == 'L':
+        is_jp2 = ext in ('.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c')
+        is_jpeg = ext in ('.jpg', '.jpeg') and im.mode in ('RGB', 'L')
+
+        is_bilevel = False
+        if not is_jp2 and not is_jpeg:
+            if (im.mode == '1') or (im.format == 'TIFF' and getattr(im, 'tag_v2', {}).get(259) == 4):
+                is_bilevel = True
+            elif im.mode in ('L', 'P'):
+                try:
                     colors = im.getcolors(2)
                     if colors and len(colors) <= 2:
-                        vals = {c[1] for c in colors}
-                        if vals.issubset({0, 255}):
-                            is_bilevel = True
-                        elif vals.issubset({0, 1}):
-                            im = im.point(lambda p: 255 if p else 0, mode='1')
-                            is_bilevel = True
-                elif im.mode == 'P':
-                    colors = im.getcolors(2)
-                    if colors and len(colors) <= 2:
-                        im_l = im.convert('L')
-                        l_colors = im_l.getcolors(2)
-                        if l_colors and len(l_colors) <= 2:
-                            vals = {c[1] for c in l_colors}
+                        if im.mode == 'L':
+                            vals = {c[1] for c in colors}
                             if vals.issubset({0, 255}):
-                                im = im_l
                                 is_bilevel = True
                             elif vals.issubset({0, 1}):
-                                im = im_l.point(lambda p: 255 if p else 0, mode='1')
+                                im = im.point(lambda p: 255 if p else 0, mode='1')
                                 is_bilevel = True
-                elif im.mode == 'RGB':
-                    colors = im.getcolors(2)
-                    if colors and len(colors) <= 2:
-                        vals = {c[1] for c in colors}
-                        if vals.issubset({(0, 0, 0), (255, 255, 255)}):
-                            im = im.convert('1')
-                            is_bilevel = True
-            except Exception:
-                pass
+                        elif im.mode == 'P':
+                            im_l = im.convert('L')
+                            l_colors = im_l.getcolors(2)
+                            if l_colors and len(l_colors) <= 2:
+                                vals = {c[1] for c in l_colors}
+                                if vals.issubset({0, 255}):
+                                    im = im_l
+                                    is_bilevel = True
+                                elif vals.issubset({0, 1}):
+                                    im = im_l.point(lambda p: 255 if p else 0, mode='1')
+                                    is_bilevel = True
+                except Exception:
+                    pass
 
         if is_bilevel:
             # 1 位黑白二值图：必须严格使用 1 位 TIFF Group 4 (Filter /CCITTFaxDecode) 封装
@@ -2448,7 +2429,7 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
                     NameObject('/EndOfBlock'): BooleanObject(False),
                 }),
             })
-        elif ext in ('.jp2', '.j2k', '.jpc', '.jpf', '.jpx', '.j2c'):
+        elif is_jp2:
             # JPEG 2000 原格式流：直接保留源数据，以 /JPXDecode 滤镜封装，100% 保持原始格式与品质
             with open(image_path, 'rb') as f:
                 jp2_data = f.read()
@@ -2471,7 +2452,7 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
             img_obj.update(img_dict)
         else:
             # 彩色或灰度图：使用 /DCTDecode (JPEG) 编码
-            if ext in ('.jpg', '.jpeg') and im.mode in ('RGB', 'L'):
+            if is_jpeg:
                 with open(image_path, 'rb') as f:
                     jpg_data = f.read()
                 cs = '/DeviceRGB' if im.mode == 'RGB' else '/DeviceGray'
