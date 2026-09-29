@@ -40,10 +40,10 @@ set "no_proxy=*"
     --windows-console-mode=disable ^
     --windows-icon-from-ico=hanji.ico ^
     --company-name="漢籍合璧" ^
-    --product-name="智能图像预处理工具 v4.0" ^
-    --file-version=4.0.0.0 ^
-    --product-version=4.0.0.0 ^
-    --file-description="智能图像预处理工具 v4.0" ^
+    --product-name="智能图像预处理工具 v4.1" ^
+    --file-version=4.1.0.0 ^
+    --product-version=4.1.0.0 ^
+    --file-description="智能图像预处理工具 v4.1" ^
     --copyright="By weiceng © 漢籍合璧" ^
     --include-data-dir=webui=webui ^
     --include-data-file=hanji.ico=hanji.ico ^
@@ -111,6 +111,6 @@ if not exist "dist" mkdir dist
 echo.
 echo ==========================================================
 echo  Nuitka Native C++ build complete:
-echo  - dist\智能图像预处理工具 v4.0.exe
-echo  - dist\c2bw-v4.0.exe
+echo  - dist\智能图像预处理工具 v4.1.exe
+echo  - dist\c2bw-v4.1.exe
 echo ==========================================================

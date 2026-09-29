@@ -76,7 +76,7 @@
           </svg>
           <span>GitHub</span>
         </a>
-        <el-tag class="version-tag" size="small" effect="plain">v4.0</el-tag>
+        <el-tag class="version-tag" size="small" effect="plain">v4.1</el-tag>
         
         <!-- 语言选择 -->
         <el-dropdown trigger="click" @command="changeLanguage" class="lang-dropdown">
@@ -899,7 +899,7 @@ async function checkForUpdates() {
       if (typeof result.has_update === 'boolean') {
         updateAvailable.value = result.has_update
       } else {
-        updateAvailable.value = compareVersions(result.current_version || '4.0.0.0', result.update.version) < 0
+        updateAvailable.value = compareVersions(result.current_version || '4.1.0.0', result.update.version) < 0
       }
     } else {
       updateAvailable.value = false

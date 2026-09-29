@@ -35,10 +35,10 @@ from c2bw.core import (
 
 
 APP_TITLES = {
-    'zh-CN': '智能图像预处理工具 v4.0',
-    'zh-TW': '智能圖像預處理工具 v4.0',
-    'ja': 'スマート画像前処理ツール v4.0',
-    'en': 'Smart Image Preprocessor v4.0',
+    'zh-CN': '智能图像预处理工具 v4.1',
+    'zh-TW': '智能圖像預處理工具 v4.1',
+    'ja': 'スマート画像前処理ツール v4.1',
+    'en': 'Smart Image Preprocessor v4.1',
 }
 
 QUIT_CONFIRMATIONS = {
@@ -49,8 +49,8 @@ QUIT_CONFIRMATIONS = {
 }
 
 UPDATE_INFO_URL = 'https://tools.hanjihebi.com/aisoft/c2bw_update.json'
-CURRENT_VERSION = '4.0.0.0'
-CURRENT_VERSION_NAME = '4.0'
+CURRENT_VERSION = '4.1.0.0'
+CURRENT_VERSION_NAME = '4.1'
 
 
 def parse_version_tuple(ver_str):
