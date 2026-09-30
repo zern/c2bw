@@ -83,14 +83,14 @@ def build_nuitka():
     if os.path.exists(pynet_runtime_dll):
         shutil.copy2(pynet_runtime_dll, "Python.Runtime.dll")
 
-    app_version = os.environ.get("APP_VERSION", "v4.1").lstrip("v")
+    app_version = os.environ.get("APP_VERSION", "v4.2").lstrip("v")
     if not app_version:
-        app_version = "4.1"
+        app_version = "4.2"
 
-    four_part_ver = "4.1.0.0"
+    four_part_ver = "4.2.0.0"
     company_name = "漢籍合璧"
-    product_name = "智能图像预处理工具 v4.1"
-    file_desc = "智能图像预处理工具 v4.1"
+    product_name = "智能图像预处理工具 v4.2"
+    file_desc = "智能图像预处理工具 v4.2"
     copyright_text = "By weiceng © 漢籍合璧"
 
     print("==========================================================")

@@ -25,11 +25,11 @@ def parse_version_info(filepath="version_info.txt"):
 def get_nuitka_flags(filepath="version_info.txt"):
     info = parse_version_info(filepath)
     company = info.get("CompanyName", "漢籍合璧")
-    prod_name = info.get("ProductName", "智能图像预处理工具 v4.1")
-    file_desc = info.get("FileDescription", "智能图像预处理工具 v4.1")
+    prod_name = info.get("ProductName", "智能图像预处理工具 v4.2")
+    file_desc = info.get("FileDescription", "智能图像预处理工具 v4.2")
     copyright_text = info.get("LegalCopyright", "By weiceng © 漢籍合璧")
-    file_ver = info.get("FileVersion", "4.1.0.0")
-    prod_ver = info.get("ProductVersion", "4.1.0.0")
+    file_ver = info.get("FileVersion", "4.2.0.0")
+    prod_ver = info.get("ProductVersion", "4.2.0.0")
 
     return [
         f'--company-name={company}',

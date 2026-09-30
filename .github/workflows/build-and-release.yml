@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 env:
-  DEFAULT_APP_VERSION: 'v4.1'
+  DEFAULT_APP_VERSION: 'v4.2'
   PYTHONIOENCODING: 'utf-8'
   PYTHONUTF8: '1'
 

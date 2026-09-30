@@ -53,6 +53,6 @@ if not exist "dist" mkdir dist
 echo.
 echo ==========================================================
 echo  Nuitka Native C++ build complete:
-echo  - dist\智能图像预处理工具 v4.1.exe
-echo  - dist\c2bw-v4.1.exe
+echo  - dist\智能图像预处理工具 v4.2.exe
+echo  - dist\c2bw-v4.2.exe
 echo ==========================================================
