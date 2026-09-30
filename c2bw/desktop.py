@@ -465,14 +465,14 @@ class WebImageProcessorBridge:
             'dir_exists_nonempty': dir_exists_nonempty,
         }
 
-    def start_pdf_extraction(self, pdf_path, extract_dir):
-        return self.service.start_pdf_extraction(pdf_path, extract_dir)
+    def start_pdf_extraction(self, pdf_path, extract_dir, deep_analysis=False):
+        return self.service.start_pdf_extraction(pdf_path, extract_dir, deep_analysis=deep_analysis)
 
-    def choose_pdf_and_extract(self, initial_directory=''):
+    def choose_pdf_and_extract(self, initial_directory='', deep_analysis=False):
         res = self.choose_pdf_file(initial_directory)
         if not res.get('ok') or res.get('cancelled'):
             return res
-        return self.service.start_pdf_extraction(res['pdf_path'], res['extract_dir'])
+        return self.service.start_pdf_extraction(res['pdf_path'], res['extract_dir'], deep_analysis=deep_analysis)
 
     def get_update_info(self):
         return self.service.get_update_info()

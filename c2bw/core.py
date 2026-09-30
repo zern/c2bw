@@ -924,42 +924,24 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
             page_num = p_idx + 1
 
             img_list = page.get_images()
-            if not img_list:
-                if deep_analysis:
-                    try:
-                        pix = page.get_pixmap(dpi=300)
-                        if pix.n - pix.alpha > 3:
-                            pix = fitz.Pixmap(fitz.csRGB, pix)
-                        data = pix.tobytes("png")
-                        ext = ".png"
-                        filename = f"page_{page_num:04d}{ext}"
-                        save_path = os.path.join(extract_dir, filename)
-                        with open(save_path, "wb") as f:
-                            f.write(data)
-                        extracted_count += 1
-                        if progress_callback:
-                            progress_callback(page_num, total_pages, f"正在进行深度分析渲染 PDF 图片：{page_num} / {total_pages} 页...")
-                        continue
-                    except Exception:
-                        pass
-                continue
 
-            # 物理对象去重（相同 xref 仅保留首次出现）
-            unique_xrefs = []
-            seen = set()
-            for item in img_list:
-                xref = item[0]
-                if xref not in seen and xref > 0:
-                    seen.add(xref)
-                    unique_xrefs.append(xref)
-
-            if not unique_xrefs:
-                continue
-
-            # 深度分析模式：针对包含多图层的 PDF 页面，将所有图层复合整合为单一页面输出
-            if deep_analysis and len(unique_xrefs) > 1:
+            # 深度分析模式：针对复杂特殊或多图层 PDF（如包含 OCG 图层、JBIG2 蒙版、前景文字与背景分层等），
+            # 将整页的所有图层内容无缝复合渲染为用户在阅读器中浏览时的完整视图，再输出供后续转换处理。
+            if deep_analysis:
                 try:
-                    # 计算页面内所有图片对象的原生最大 DPI，确保渲染画质与原图一致
+                    unique_xrefs = []
+                    seen = set()
+                    for item in img_list:
+                        xref = item[0]
+                        if xref not in seen and xref > 0:
+                            seen.add(xref)
+                            unique_xrefs.append(xref)
+                        smask_ref = item[1] if len(item) > 1 else 0
+                        if smask_ref not in seen and smask_ref > 0:
+                            seen.add(smask_ref)
+                            unique_xrefs.append(smask_ref)
+
+                    # 计算页面内所有图片对象（包含 /SMask 蒙版）的原生最大 DPI，确保画质清晰且不模糊
                     max_img_dpi = 300.0
                     for x in unique_xrefs:
                         try:
@@ -979,7 +961,7 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                             pass
 
                     render_dpi = int(round(max(300.0, min(max_img_dpi, 600.0))))
-                    # 整页多图层复合渲染为单一 Pixmap（alpha=False 使用白色背景混合合成）
+                    # 整页多图层复合渲染为单一 Pixmap 浏览视图（alpha=False 使用白色背景混合合成所有图层、蒙版与矢量内容）
                     pix = page.get_pixmap(dpi=render_dpi, alpha=False)
                     if pix.n - pix.alpha > 3:
                         pix = fitz.Pixmap(fitz.csRGB, pix)
@@ -993,11 +975,26 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                     extracted_count += 1
 
                     if progress_callback:
-                        progress_callback(page_num, total_pages, f"正在进行深度分析整合多图层：{page_num} / {total_pages} 页...")
+                        progress_callback(page_num, total_pages, f"正在进行深度分析整合多图层视图：{page_num} / {total_pages} 页...")
                     continue
                 except Exception:
                     # 若复合渲染异常则平滑回退至单图层提取逻辑
                     pass
+
+            if not img_list:
+                continue
+
+            # 物理对象去重（相同 xref 仅保留首次出现）
+            unique_xrefs = []
+            seen = set()
+            for item in img_list:
+                xref = item[0]
+                if xref not in seen and xref > 0:
+                    seen.add(xref)
+                    unique_xrefs.append(xref)
+
+            if not unique_xrefs:
+                continue
 
             # 多个图层时仅保留最底层的图片：
             # 1. 过滤作为 /SMask 遮罩引用的 xref
