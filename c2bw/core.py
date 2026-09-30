@@ -918,75 +918,101 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
             return 0, "PDF 中没有有效页面。"
 
         extracted_count = 0
+
+        # 深度处理专属高速流水线：针对复杂特殊或多图层 PDF（如包含 OCG 图层、JBIG2 蒙版、前景文字与背景分层等），
+        # 将整页的所有图层内容无缝复合渲染为用户在阅读器中浏览时的完整视图，并通过异步双工流水线实现渲染与编码写盘并行重叠。
+        if deep_analysis:
+            from concurrent.futures import ThreadPoolExecutor
+
+            def _async_save_jpeg(save_path, mode, width, height, raw_bytes):
+                try:
+                    from PIL import Image
+                    img = Image.frombytes(mode, (width, height), raw_bytes)
+                    img.save(save_path, format="JPEG", quality=80)
+                    return True
+                except Exception:
+                    return False
+
+            with ThreadPoolExecutor(max_workers=3) as save_pool:
+                pending_saves = []
+                cached_render_dpi = None
+
+                for p_idx, page in enumerate(doc):
+                    if cancel_event and cancel_event.is_set():
+                        for fut, _ in pending_saves:
+                            try:
+                                fut.result()
+                            except Exception:
+                                pass
+                        return extracted_count, "已取消提取。"
+
+                    page_num = p_idx + 1
+
+                    try:
+                        # 1. 极速 DPI 估算：直接利用 page.rect 和图片元组尺寸计算，完全消除耗时的 get_image_rects 内容流解析
+                        if cached_render_dpi is None:
+                            img_list = page.get_images()
+                            max_img_dpi = 300.0
+                            if page.rect.width > 0 and page.rect.height > 0:
+                                for item in img_list:
+                                    w = item[2] if len(item) > 2 else 0
+                                    h = item[3] if len(item) > 3 else 0
+                                    if w > 0 and h > 0:
+                                        max_img_dpi = max(max_img_dpi, (w / page.rect.width) * 72.0, (h / page.rect.height) * 72.0)
+                            cached_render_dpi = int(round(max(300.0, min(max_img_dpi, 600.0))))
+                            render_dpi = cached_render_dpi
+                        else:
+                            render_dpi = cached_render_dpi
+
+                        # 2. 直接按 RGB 色彩空间光栅化渲染，省去后置色彩空间转换与重新分配内存开销
+                        pix = page.get_pixmap(dpi=render_dpi, colorspace=fitz.csRGB, alpha=False)
+
+                        filename = f"page_{page_num:04d}.jpg"
+                        save_path = os.path.join(extract_dir, filename)
+                        mode = "RGB" if pix.n >= 3 else "L"
+
+                        # 3. 异步流水线保存：由后台线程池执行硬件加速 JPEG 压缩与磁盘写入，主线程零等待立即进入下一页渲染
+                        fut = save_pool.submit(_async_save_jpeg, save_path, mode, pix.width, pix.height, bytes(pix.samples))
+                        pending_saves.append((fut, save_path))
+
+                        # 内存保护：限制异步积压队列深度不超过 4，避免占用过多内存，自动等待最早任务完成
+                        if len(pending_saves) >= 4:
+                            old_fut, _ = pending_saves.pop(0)
+                            old_fut.result()
+
+                        extracted_count += 1
+                        if progress_callback:
+                            progress_callback(page_num, total_pages, f"正在进行深度处理整合多图层视图：{page_num} / {total_pages} 页...")
+
+                    except Exception:
+                        # 极端异常备用方案：尝试直接导出当前页
+                        try:
+                            pix = page.get_pixmap(dpi=300, alpha=False)
+                            save_path = os.path.join(extract_dir, f"page_{page_num:04d}.jpg")
+                            with open(save_path, "wb") as f:
+                                f.write(pix.tobytes("jpg", jpg_quality=80))
+                            extracted_count += 1
+                        except Exception:
+                            pass
+
+                # 等待所有异步写盘完成
+                for fut, _ in pending_saves:
+                    try:
+                        fut.result()
+                    except Exception:
+                        pass
+
+            if extracted_count == 0:
+                return 0, "该 PDF 中未检测到可提取的分页图片（可能为纯文本矢量排版或受保护）。"
+            return extracted_count, ""
+
+        # 常规模式：逐页快速提取底层原始图片流
         for p_idx, page in enumerate(doc):
             if cancel_event and cancel_event.is_set():
                 return extracted_count, "已取消提取。"
             page_num = p_idx + 1
 
             img_list = page.get_images()
-
-            # 深度处理模式：针对复杂特殊或多图层 PDF（如包含 OCG 图层、JBIG2 蒙版、前景文字与背景分层等），
-            # 将整页的所有图层内容无缝复合渲染为用户在阅读器中浏览时的完整视图，再输出供后续转换处理。
-            if deep_analysis:
-                try:
-                    # 计算页面内所有图片对象的原生最大 DPI，确保画质清晰且不模糊
-                    # 直接从 img_list 元组中读取 (xref, smask, width, height, ...) 的宽高，避免调用 doc.extract_image 导致重复流解压
-                    max_img_dpi = 300.0
-                    for item in img_list:
-                        try:
-                            xref = item[0]
-                            w = item[2] if len(item) > 2 else 0
-                            h = item[3] if len(item) > 3 else 0
-                            if w > 0 and h > 0:
-                                rects = page.get_image_rects(xref)
-                                if rects and rects[0].width > 0 and rects[0].height > 0:
-                                    dpi_x = (w / rects[0].width) * 72.0
-                                    dpi_y = (h / rects[0].height) * 72.0
-                                    max_img_dpi = max(max_img_dpi, dpi_x, dpi_y)
-                                elif page.rect.width > 0 and page.rect.height > 0:
-                                    dpi_w = (w / page.rect.width) * 72.0
-                                    dpi_h = (h / page.rect.height) * 72.0
-                                    max_img_dpi = max(max_img_dpi, dpi_w, dpi_h)
-                        except Exception:
-                            pass
-
-                    render_dpi = int(round(max(300.0, min(max_img_dpi, 600.0))))
-                    # 整页多图层复合渲染为单一 Pixmap 浏览视图（alpha=False 使用白色背景混合合成所有图层、蒙版与矢量内容）
-                    pix = page.get_pixmap(dpi=render_dpi, alpha=False)
-                    if pix.n - pix.alpha > 3:
-                        pix = fitz.Pixmap(fitz.csRGB, pix)
-
-                    filename = f"page_{page_num:04d}.jpg"
-                    save_path = os.path.join(extract_dir, filename)
-
-                    # 优先使用 PIL 快速保存为高质量 JPEG（质量 80，利用 libjpeg-turbo 硬件加速，提升保存速度并大幅降低体积）
-                    saved_jpg = False
-                    try:
-                        from PIL import Image
-                        mode = "RGB" if pix.n >= 3 else "L"
-                        img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
-                        img.save(save_path, format="JPEG", quality=80)
-                        saved_jpg = True
-                    except Exception:
-                        pass
-
-                    if not saved_jpg:
-                        try:
-                            data = pix.tobytes("jpg", jpg_quality=80)
-                        except Exception:
-                            data = pix.tobytes("jpg")
-                        with open(save_path, "wb") as f:
-                            f.write(data)
-
-                    extracted_count += 1
-
-                    if progress_callback:
-                        progress_callback(page_num, total_pages, f"正在进行深度处理整合多图层视图：{page_num} / {total_pages} 页...")
-                    continue
-                except Exception:
-                    # 若复合渲染异常则平滑回退至单图层提取逻辑
-                    pass
-
             if not img_list:
                 continue
 
