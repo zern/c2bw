@@ -929,34 +929,24 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
             # 将整页的所有图层内容无缝复合渲染为用户在阅读器中浏览时的完整视图，再输出供后续转换处理。
             if deep_analysis:
                 try:
-                    unique_xrefs = []
-                    seen = set()
-                    for item in img_list:
-                        xref = item[0]
-                        if xref not in seen and xref > 0:
-                            seen.add(xref)
-                            unique_xrefs.append(xref)
-                        smask_ref = item[1] if len(item) > 1 else 0
-                        if smask_ref not in seen and smask_ref > 0:
-                            seen.add(smask_ref)
-                            unique_xrefs.append(smask_ref)
-
-                    # 计算页面内所有图片对象（包含 /SMask 蒙版）的原生最大 DPI，确保画质清晰且不模糊
+                    # 计算页面内所有图片对象的原生最大 DPI，确保画质清晰且不模糊
+                    # 直接从 img_list 元组中读取 (xref, smask, width, height, ...) 的宽高，避免调用 doc.extract_image 导致重复流解压
                     max_img_dpi = 300.0
-                    for x in unique_xrefs:
+                    for item in img_list:
                         try:
-                            meta = doc.extract_image(x)
-                            w = meta.get("width", 0)
-                            h = meta.get("height", 0)
-                            rects = page.get_image_rects(x)
-                            if rects and rects[0].width > 0 and rects[0].height > 0:
-                                dpi_x = (w / rects[0].width) * 72.0
-                                dpi_y = (h / rects[0].height) * 72.0
-                                max_img_dpi = max(max_img_dpi, dpi_x, dpi_y)
-                            elif page.rect.width > 0 and page.rect.height > 0:
-                                dpi_w = (w / page.rect.width) * 72.0
-                                dpi_h = (h / page.rect.height) * 72.0
-                                max_img_dpi = max(max_img_dpi, dpi_w, dpi_h)
+                            xref = item[0]
+                            w = item[2] if len(item) > 2 else 0
+                            h = item[3] if len(item) > 3 else 0
+                            if w > 0 and h > 0:
+                                rects = page.get_image_rects(xref)
+                                if rects and rects[0].width > 0 and rects[0].height > 0:
+                                    dpi_x = (w / rects[0].width) * 72.0
+                                    dpi_y = (h / rects[0].height) * 72.0
+                                    max_img_dpi = max(max_img_dpi, dpi_x, dpi_y)
+                                elif page.rect.width > 0 and page.rect.height > 0:
+                                    dpi_w = (w / page.rect.width) * 72.0
+                                    dpi_h = (h / page.rect.height) * 72.0
+                                    max_img_dpi = max(max_img_dpi, dpi_w, dpi_h)
                         except Exception:
                             pass
 
@@ -965,13 +955,29 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                     pix = page.get_pixmap(dpi=render_dpi, alpha=False)
                     if pix.n - pix.alpha > 3:
                         pix = fitz.Pixmap(fitz.csRGB, pix)
-                    data = pix.tobytes("png")
-                    ext = ".png"
 
-                    filename = f"page_{page_num:04d}{ext}"
+                    filename = f"page_{page_num:04d}.jpg"
                     save_path = os.path.join(extract_dir, filename)
-                    with open(save_path, "wb") as f:
-                        f.write(data)
+
+                    # 优先使用 PIL 快速保存为高质量 JPEG（质量 80，利用 libjpeg-turbo 硬件加速，提升保存速度并大幅降低体积）
+                    saved_jpg = False
+                    try:
+                        from PIL import Image
+                        mode = "RGB" if pix.n >= 3 else "L"
+                        img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+                        img.save(save_path, format="JPEG", quality=80)
+                        saved_jpg = True
+                    except Exception:
+                        pass
+
+                    if not saved_jpg:
+                        try:
+                            data = pix.tobytes("jpg", jpg_quality=80)
+                        except Exception:
+                            data = pix.tobytes("jpg")
+                        with open(save_path, "wb") as f:
+                            f.write(data)
+
                     extracted_count += 1
 
                     if progress_callback:
