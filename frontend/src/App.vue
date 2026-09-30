@@ -252,6 +252,13 @@
             </el-checkbox>
           </div>
 
+          <div class="directory-option">
+            <el-checkbox v-model="pdfForm.deep_analysis" :disabled="processing">
+              {{ t('chkDeepAnalysis') }}
+            </el-checkbox>
+            <span>{{ t('tipDeepAnalysis') }}</span>
+          </div>
+
           <div class="directory-option pdf-hint">
             <el-icon><InfoFilled /></el-icon>
             <span v-if="pdfForm.no_convert_pdf && !form.enable_crop && !form.enable_binarize">{{ t('pdfHintExtractOnly') }}</span>
@@ -723,7 +730,8 @@ let isPolling = false
 const pdfForm = reactive({
   pdf_path: '',
   output_dir: '',
-  no_convert_pdf: false
+  no_convert_pdf: false,
+  deep_analysis: false
 })
 
 const form = reactive({
@@ -1102,6 +1110,7 @@ async function startTask() {
       pdf_path: pdfForm.pdf_path,
       output_dir: (pdfForm.output_dir || '').trim(),
       no_convert_pdf: pdfForm.no_convert_pdf,
+      deep_analysis: pdfForm.deep_analysis,
       lang: currentLang.value
     })
 

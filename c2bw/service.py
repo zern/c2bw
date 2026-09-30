@@ -373,6 +373,7 @@ class ImageProcessorService:
                 'no_convert_pdf': no_convert_pdf,
                 'enable_binarize': enable_binarize,
                 'invert_binarize': invert_binarize,
+                'deep_analysis': bool(raw_settings.get('deep_analysis', False)),
                 'bin_method': str(raw_settings.get('bin_method', '0')),
                 'threshold_val': int(raw_settings.get('threshold_val', 50)),
                 'wolf_preset': str(raw_settings.get('wolf_preset', 'standard')),
@@ -488,7 +489,7 @@ class ImageProcessorService:
         ).start()
         return {'ok': True, 'target_dir': settings['target_dir']}
 
-    def start_pdf_extraction(self, pdf_path, extract_dir):
+    def start_pdf_extraction(self, pdf_path, extract_dir, deep_analysis=False):
         """确认后在后台启动 PDF 分页图片提取。"""
         with self.state_lock:
             if self.is_processing:
@@ -540,7 +541,7 @@ class ImageProcessorService:
             self.ui_events.put(('status', get_backend_text('status_extracting_pdf', lang)))
             try:
                 count, err = extract_images_from_pdf(
-                    cleaned_pdf_path, extract_dir, progress_callback=_progress, cancel_event=self.cancel_event
+                    cleaned_pdf_path, extract_dir, progress_callback=_progress, cancel_event=self.cancel_event, deep_analysis=deep_analysis
                 )
             finally:
                 if wm_temp_path and os.path.exists(wm_temp_path):
@@ -1172,7 +1173,10 @@ class ImageProcessorService:
 
         try:
             extracted_count, err = extract_images_from_pdf(
-                cleaned_pdf_path, raw_dir, progress_callback=_extract_progress, cancel_event=self.cancel_event
+                cleaned_pdf_path, raw_dir,
+                progress_callback=_extract_progress,
+                cancel_event=self.cancel_event,
+                deep_analysis=settings.get('deep_analysis', False),
             )
         finally:
             if wm_temp_path and os.path.exists(wm_temp_path):

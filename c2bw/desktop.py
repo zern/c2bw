@@ -668,6 +668,7 @@ class ImageProcessorApp:
         self.enable_pdf = tk.BooleanVar(value=False)
         self.keep_images_after_pdf = tk.BooleanVar(value=False)
         self.pdf_no_convert = tk.BooleanVar(value=False)
+        self.pdf_deep_analysis = tk.BooleanVar(value=False)
 
         # --- 状态与线程控制 ---
         self.is_processing = False
@@ -767,20 +768,26 @@ class ImageProcessorApp:
             command=self._update_pdf_hint,
         ).grid(row=3, column=1, sticky=tk.W, pady=3, padx=5)
 
+        ttk.Checkbutton(
+            self.pdf_frame,
+            text="深度分析 (针对复杂、特殊的PDF，勾选后任务默认调用 PyMuPDF Pixmap处理)",
+            variable=self.pdf_deep_analysis,
+        ).grid(row=4, column=1, sticky=tk.W, pady=3, padx=5)
+
         self.pdf_hint_label = ttk.Label(
             self.pdf_frame,
             text="提示: 提取原图并完成处理后，将自动合并为新 PDF 并删除临时分页图片",
             font=('Microsoft YaHei', 9),
             foreground="#0284c7"
         )
-        self.pdf_hint_label.grid(row=4, column=1, columnspan=2, sticky=tk.W, pady=3)
+        self.pdf_hint_label.grid(row=5, column=1, columnspan=2, sticky=tk.W, pady=3)
 
         ttk.Label(
             self.pdf_frame,
             text="注：仅支持图片类型的 PDF 文件处理（扫描件、古籍、插画等图片打包生成的 PDF）",
             font=('Microsoft YaHei', 8),
             foreground="#d97706"
-        ).grid(row=5, column=1, columnspan=2, sticky=tk.W, pady=(1, 3))
+        ).grid(row=6, column=1, columnspan=2, sticky=tk.W, pady=(1, 3))
 
         self.dir_frame.pack(fill=tk.X)
 
@@ -1633,6 +1640,7 @@ class ImageProcessorApp:
                 'no_convert_pdf': no_convert_pdf,
                 'enable_binarize': enable_binarize,
                 'invert_binarize': invert_binarize,
+                'deep_analysis': self.pdf_deep_analysis.get(),
                 'bin_method': self.bin_method.get(),
                 'threshold_val': thresh,
                 'wolf_preset': self.wolf_preset.get(),

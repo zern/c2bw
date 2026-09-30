@@ -806,8 +806,8 @@ def _select_bottom_layer_image(page, img_keys):
     return unique_candidates[0]
 
 
-def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, cancel_event=None):
-    """使用 PyMuPDF/fitz 引擎进行全格式（含 JBIG2）无损图像提取，针对多图层严格仅提取最底层图片。"""
+def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, cancel_event=None, deep_analysis=False):
+    """使用 PyMuPDF/fitz 引擎进行全格式（含 JBIG2）图像提取，针对多图层严格仅提取最底层图片。支持深度分析 Pixmap 模式。"""
     doc = fitz.open(pdf_path)
     try:
         total_pages = len(doc)
@@ -822,6 +822,23 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
 
             img_list = page.get_images()
             if not img_list:
+                if deep_analysis:
+                    try:
+                        pix = page.get_pixmap(dpi=300)
+                        if pix.n - pix.alpha > 3:
+                            pix = fitz.Pixmap(fitz.csRGB, pix)
+                        data = pix.tobytes("png")
+                        ext = ".png"
+                        filename = f"page_{page_num:04d}{ext}"
+                        save_path = os.path.join(extract_dir, filename)
+                        with open(save_path, "wb") as f:
+                            f.write(data)
+                        extracted_count += 1
+                        if progress_callback:
+                            progress_callback(page_num, total_pages, f"正在进行深度分析渲染 PDF 图片：{page_num} / {total_pages} 页...")
+                        continue
+                    except Exception:
+                        pass
                 continue
 
             # 物理对象去重（相同 xref 仅保留首次出现）
@@ -866,34 +883,39 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
             # 3. 按内容流绘制顺序，首个主图即为画布最底层的底图
             bottom_xref = candidate_xrefs[0]
             try:
-                img_info = doc.extract_image(bottom_xref)
-                raw_ext = (img_info.get("ext") or "").lower() if img_info else ""
                 data = None
                 ext = None
 
-                # 针对标准主流图像格式直接使用原始提取数据，保障最高画质与极速提取
-                if raw_ext in ("jpeg", "jpg"):
-                    ext = ".jpg"
-                    data = img_info.get("image")
-                elif raw_ext == "png":
-                    ext = ".png"
-                    data = img_info.get("image")
-                elif raw_ext in ("tiff", "tif"):
-                    ext = ".tif"
-                    data = img_info.get("image")
-                    if data:
-                        data = _normalize_extracted_tiff(data)
-                elif raw_ext == "bmp":
-                    ext = ".bmp"
-                    data = img_info.get("image")
+                if not deep_analysis:
+                    img_info = doc.extract_image(bottom_xref)
+                    raw_ext = (img_info.get("ext") or "").lower() if img_info else ""
 
-                # 极速轻量合法性校验：仅当缺少有效数据或头部异常时才触发 Pixmap 渲染解码
-                need_pixmap = not (data and ext)
-                if not need_pixmap:
-                    if ext == ".jpg" and not data.startswith(b'\xff\xd8'):
-                        need_pixmap = True
-                    elif ext == ".png" and not data.startswith(b'\x89PNG'):
-                        need_pixmap = True
+                    # 针对标准主流图像格式直接使用原始提取数据，保障最高画质与极速提取
+                    if raw_ext in ("jpeg", "jpg"):
+                        ext = ".jpg"
+                        data = img_info.get("image")
+                    elif raw_ext == "png":
+                        ext = ".png"
+                        data = img_info.get("image")
+                    elif raw_ext in ("tiff", "tif"):
+                        ext = ".tif"
+                        data = img_info.get("image")
+                        if data:
+                            data = _normalize_extracted_tiff(data)
+                    elif raw_ext == "bmp":
+                        ext = ".bmp"
+                        data = img_info.get("image")
+
+                    # 极速轻量合法性校验：仅当缺少有效数据或头部异常时才触发 Pixmap 渲染解码
+                    need_pixmap = not (data and ext)
+                    if not need_pixmap:
+                        if ext == ".jpg" and not data.startswith(b'\xff\xd8'):
+                            need_pixmap = True
+                        elif ext == ".png" and not data.startswith(b'\x89PNG'):
+                            need_pixmap = True
+                else:
+                    # 深度分析模式：针对复杂特殊 PDF 默认调用 PyMuPDF Pixmap 渲染处理
+                    need_pixmap = True
 
                 if need_pixmap:
                     try:
@@ -904,7 +926,16 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                         data = pix.tobytes("png")
                         ext = ".png"
                     except Exception:
-                        pass
+                        if deep_analysis:
+                            # 深度分析兜底：若单个 xref 提取失败，整页 Pixmap 渲染
+                            try:
+                                pix = page.get_pixmap(dpi=300)
+                                if pix.n - pix.alpha > 3:
+                                    pix = fitz.Pixmap(fitz.csRGB, pix)
+                                data = pix.tobytes("png")
+                                ext = ".png"
+                            except Exception:
+                                pass
 
                 if not data or not ext:
                     continue
@@ -923,7 +954,8 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                 continue
 
             if progress_callback:
-                progress_callback(page_num, total_pages, f"正在提取 PDF 原始图片：{page_num} / {total_pages} 页...")
+                status_text = f"正在进行深度分析渲染 PDF 图片：{page_num} / {total_pages} 页..." if deep_analysis else f"正在提取 PDF 原始图片：{page_num} / {total_pages} 页..."
+                progress_callback(page_num, total_pages, status_text)
 
         if extracted_count == 0:
             return 0, "该 PDF 中未检测到可提取的分页图片（可能为纯文本矢量排版或受保护）。"
@@ -1053,17 +1085,18 @@ def _extract_images_with_pypdf(pdf_path, extract_dir, progress_callback=None, ca
     return extracted_count, ""
 
 
-def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cancel_event=None):
+def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cancel_event=None, deep_analysis=False):
     """
     从图片打包型 PDF 中提取所有原始分页图片到指定目录（保持原图质量与参数，不作有损重压缩）。
     当出现包含多个图层的分页时，精准识别并仅保留最底层的图片（底层原图）。
+    支持 deep_analysis 选项，开启后默认调用 PyMuPDF Pixmap 进行深度分析渲染。
     """
     os.makedirs(extract_dir, exist_ok=True)
 
     # 优先尝试使用 fitz (PyMuPDF) 引擎：原生支持全格式（含 JBIG2）、解析速度快数十倍且完美支持多图层底层筛选
     if fitz is not None:
         try:
-            return _extract_images_with_fitz(pdf_path, extract_dir, progress_callback, cancel_event)
+            return _extract_images_with_fitz(pdf_path, extract_dir, progress_callback, cancel_event, deep_analysis=deep_analysis)
         except Exception as _fe:
             print(f"[PDF Extract Warning] PyMuPDF 引擎执行异常: {_fe}，回退至 pypdf 引擎")
     else:
@@ -1219,6 +1252,9 @@ REPORT_TEXTS = {
         'crop_overlap': "，中缝重叠 {overlap}%",
         'pdf_mode_no_conv': "- PDF 输出: 不转换为 PDF (仅保留处理后的图片文件)",
         'pdf_mode_reconstruct': "- PDF 输出: 合并为新 PDF 并自动清理临时分页图片",
+        'pdf_deep_analysis': "- 深度分析: {val}",
+        'deep_enabled': "已启用 (PyMuPDF Pixmap 渲染)",
+        'deep_disabled': "未启用 (直接提取原始流)",
         'dir_mode_direct': "- PDF 输出: 直接打包为 PDF (保持原图格式与品质，无中间图片)",
         'dir_mode_merge': "- PDF 输出: 合并输出为单个 PDF ({detail})",
         'dir_mode_merge_keep': "保留处理后的图片",
@@ -1283,6 +1319,9 @@ REPORT_TEXTS = {
         'crop_overlap': "，中縫重疊 {overlap}%",
         'pdf_mode_no_conv': "- PDF 輸出: 不轉換為 PDF (僅保留處理後的圖片檔案)",
         'pdf_mode_reconstruct': "- PDF 輸出: 合併為新 PDF 並自動清理臨時分頁圖片",
+        'pdf_deep_analysis': "- 深度分析: {val}",
+        'deep_enabled': "已啟用 (PyMuPDF Pixmap 渲染)",
+        'deep_disabled': "未啟用 (直接提取原始流)",
         'dir_mode_direct': "- PDF 輸出: 直接打包為 PDF (保持原圖格式與品質，無中間圖片)",
         'dir_mode_merge': "- PDF 輸出: 合併輸出為單個 PDF ({detail})",
         'dir_mode_merge_keep': "保留處理後的圖片",
@@ -1347,6 +1386,9 @@ REPORT_TEXTS = {
         'crop_overlap': "，ノド重複 {overlap}%",
         'pdf_mode_no_conv': "- PDF 出力: PDFに変換しない (処理済み画像のみ保持)",
         'pdf_mode_reconstruct': "- PDF 出力: 新規PDFへ統合し一時画像を自動消去",
+        'pdf_deep_analysis': "- 高度な分析: {val}",
+        'deep_enabled': "有効 (PyMuPDF Pixmap 処理)",
+        'deep_disabled': "無効 (元のストリームを直接抽出)",
         'dir_mode_direct': "- PDF 出力: 直接PDFにパック (元の形式・品質を維持、中間画像なし)",
         'dir_mode_merge': "- PDF 出力: 単一PDFへ統合出力 ({detail})",
         'dir_mode_merge_keep': "処理済み画像を保持",
@@ -1411,6 +1453,9 @@ REPORT_TEXTS = {
         'crop_overlap': ", Gutter overlap {overlap}%",
         'pdf_mode_no_conv': "- PDF Output: Do not convert to PDF (Keep processed images only)",
         'pdf_mode_reconstruct': "- PDF Output: Merge into new PDF and clean temporary images",
+        'pdf_deep_analysis': "- Deep Analysis: {val}",
+        'deep_enabled': "Enabled (PyMuPDF Pixmap processing)",
+        'deep_disabled': "Disabled (direct raw stream extract)",
         'dir_mode_direct': "- PDF Output: Directly pack into PDF (Keep original quality, no intermediate images)",
         'dir_mode_merge': "- PDF Output: Merge into a single PDF ({detail})",
         'dir_mode_merge_keep': "Keep processed images",
@@ -2237,6 +2282,8 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
             lines.append(t['pdf_mode_no_conv'])
         else:
             lines.append(t['pdf_mode_reconstruct'])
+        deep_val = t['deep_enabled'] if settings.get('deep_analysis') else t['deep_disabled']
+        lines.append(t['pdf_deep_analysis'].format(val=deep_val))
     else:
         if summary.get('direct_pdf'):
             lines.append(t['dir_mode_direct'])
