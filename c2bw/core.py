@@ -1243,6 +1243,9 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
         except Exception as _fe:
             print(f"[PDF Extract Warning] PyMuPDF 引擎执行异常: {_fe}，回退至 pypdf 引擎")
     else:
+        if deep_analysis:
+            err_msg = f"深度分析模式需要 PyMuPDF (fitz) 引擎，当前运行环境未成功加载该引擎 ({_fitz_import_error or 'ModuleNotFoundError'})。"
+            return 0, err_msg
         if _fitz_import_error:
             print(f"[PDF Extract Notice] 未加载 PyMuPDF 引擎 ({_fitz_import_error})，回退至 pypdf 引擎")
 

@@ -40,6 +40,15 @@ if not os.path.exists(src):
 
 os.makedirs("dist", exist_ok=True)
 
+py3_dll = os.path.join(sys.prefix, 'python3.dll')
+if not os.path.exists(py3_dll):
+    py3_dll = r"C:\Program Files\python\python3.dll"
+if os.path.exists(py3_dll):
+    try:
+        shutil.copyfile(py3_dll, os.path.join("dist", "python3.dll"))
+    except Exception:
+        pass
+
 for t in targets:
     dst = os.path.join("dist", t)
     for attempt in range(5):

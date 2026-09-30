@@ -74,6 +74,10 @@ def build_nuitka():
     mupdf_dir = os.path.dirname(pymupdf.__file__)
     fitz_dir = os.path.dirname(fitz.__file__)
 
+    py3_dll = os.path.join(sys.prefix, 'python3.dll')
+    if not os.path.exists(py3_dll):
+        py3_dll = r"C:\Program Files\python\python3.dll"
+
     # 准备 Python.Runtime.dll 便携运行时
     pynet_runtime_dll = os.path.join(pynet_dir, "runtime", "Python.Runtime.dll")
     if os.path.exists(pynet_runtime_dll):
@@ -117,6 +121,8 @@ def build_nuitka():
         f"--include-data-dir={os.path.join(clr_dir, 'ffi', 'dlls')}=clr_loader/ffi/dlls",
         f"--include-data-files={os.path.join(mupdf_dir, '*.*')}=pymupdf/",
         f"--include-data-files={os.path.join(fitz_dir, '*.*')}=fitz/",
+        f"--include-data-file={py3_dll}=python3.dll",
+        f"--include-data-file={py3_dll}=pymupdf/python3.dll",
         "--nofollow-import-to=fitz",
         "--nofollow-import-to=pymupdf",
         "--no-deployment-flag=excluded-module-usage",
