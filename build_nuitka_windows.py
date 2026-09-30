@@ -11,6 +11,13 @@ import shutil
 import ctypes
 from ctypes import wintypes
 
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 def inspect_pe_version_info(filepath):
     """使用 Windows 原生 Version API 读取 PE 文件的版本元数据信息。"""
