@@ -91,7 +91,11 @@ jobs:
             throw "Windows Nuitka build executable not found in dist/"
           }
           Write-Host "Verifying Windows Nuitka VersionInfo:"
-          (Get-Item $builtNuitkaExe.FullName).VersionInfo | Format-List *
+          $nuitkaVer = (Get-Item $builtNuitkaExe.FullName).VersionInfo
+          $nuitkaVer | Format-List *
+          if (-not $nuitkaVer.FileVersion -or -not $nuitkaVer.ProductName) {
+            throw "Windows Nuitka executable is missing VersionInfo metadata!"
+          }
 
       # 2. 构建 Windows 7 专用独立版 (Python 3.8 + pythonnet)
       - name: Build Windows 7 executable
@@ -107,7 +111,11 @@ jobs:
             throw "Windows 7 build executable not found in dist/"
           }
           Write-Host "Verifying Windows 7 VersionInfo:"
-          (Get-Item $builtWin7Exe.FullName).VersionInfo | Format-List *
+          $win7Ver = (Get-Item $builtWin7Exe.FullName).VersionInfo
+          $win7Ver | Format-List *
+          if (-not $win7Ver.FileVersion -or -not $win7Ver.ProductName) {
+            throw "Windows 7 executable is missing VersionInfo metadata!"
+          }
 
       - name: Generate Windows Checksums
         shell: pwsh

@@ -87,10 +87,14 @@ def build_nuitka():
     if not app_version:
         app_version = "4.2"
 
-    four_part_ver = "4.2.0.0"
+    import re
+    parts = [int(p) for p in re.findall(r"\d+", app_version)]
+    while len(parts) < 4:
+        parts.append(0)
+    four_part_ver = ".".join(str(p) for p in parts[:4])
     company_name = "漢籍合璧"
-    product_name = "智能图像预处理工具 v4.2"
-    file_desc = "智能图像预处理工具 v4.2"
+    product_name = f"智能图像预处理工具 v{app_version}"
+    file_desc = f"智能图像预处理工具 v{app_version}"
     copyright_text = "By weiceng © 漢籍合璧"
 
     print("==========================================================")

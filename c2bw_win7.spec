@@ -3,6 +3,53 @@
 
 import os
 import sys
+import re
+
+# 动态确保 version_info.txt 与当前 APP_VERSION 一致，确保 Actions 和本地打包始终包含版本元数据
+app_version = os.environ.get("APP_VERSION", "v4.2").lstrip("v")
+if not app_version:
+    app_version = "4.2"
+parts = [int(p) for p in re.findall(r"\d+", app_version)]
+while len(parts) < 4:
+    parts.append(0)
+four_part_tuple = tuple(parts[:4])
+four_part_str = ".".join(str(p) for p in parts[:4])
+
+version_info_content = f'''# UTF-8
+VSVersionInfo(
+  ffi=FixedFileInfo(
+    filevers={four_part_tuple},
+    prodvers={four_part_tuple},
+    mask=0x3f,
+    flags=0x0,
+    OS=0x40004,
+    fileType=0x1,
+    subtype=0x0,
+    date=(0, 0)
+    ),
+  kids=[
+    StringFileInfo(
+      [
+      StringTable(
+        u'080404b0',
+        [StringStruct(u'CompanyName', u'漢籍合璧'),
+        StringStruct(u'FileDescription', u'智能图像预处理工具 v{app_version}'),
+        StringStruct(u'FileVersion', u'{four_part_str}'),
+        StringStruct(u'InternalName', u'c2bw_processor'),
+        StringStruct(u'LegalCopyright', u'By weiceng © 漢籍合璧'),
+        StringStruct(u'OriginalFilename', u'智能图像预处理工具 v{app_version}.exe'),
+        StringStruct(u'ProductName', u'智能图像预处理工具 v{app_version}'),
+        StringStruct(u'ProductVersion', u'{four_part_str}')])
+      ]),
+    VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
+  ]
+)
+'''
+try:
+    with open("version_info.txt", "w", encoding="utf-8") as _vf:
+        _vf.write(version_info_content)
+except Exception:
+    pass
 import clr_loader
 import pythonnet
 

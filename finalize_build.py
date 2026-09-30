@@ -14,23 +14,27 @@ if sys.platform == "win32":
 
 mode = sys.argv[1] if len(sys.argv) > 1 else "win11"
 
+app_version = os.environ.get("APP_VERSION", "v4.2").strip()
+if not app_version.startswith("v"):
+    app_version = f"v{app_version}"
+
 if mode == "win11":
     src = os.path.join("dist", "c2bw_win11.exe")
     targets = [
-        "智能图像预处理工具 v4.2.exe",
-        "c2bw-v4.2.exe",
+        f"智能图像预处理工具 {app_version}.exe",
+        f"c2bw-{app_version}.exe",
     ]
 elif mode == "win7":
     src = os.path.join("dist", "c2bw_win7.exe")
     targets = [
-        "智能图像预处理工具 v4.2_Win7.exe",
-        "c2bw-v4.2_Win7.exe",
+        f"智能图像预处理工具 {app_version}_Win7.exe",
+        f"c2bw-{app_version}_Win7.exe",
     ]
 elif mode == "nuitka":
     src = os.path.join("dist_nuitka", "c2bw_nuitka.exe")
     targets = [
-        "智能图像预处理工具 v4.2.exe",
-        "c2bw-v4.2.exe",
+        f"智能图像预处理工具 {app_version}.exe",
+        f"c2bw-{app_version}.exe",
     ]
 else:
     raise ValueError(f"Unknown mode: {mode}")
