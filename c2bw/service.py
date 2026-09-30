@@ -521,7 +521,7 @@ class ImageProcessorService:
             lang = get_system_language()
             self.ui_events.put(('status', get_backend_text('status_checking_watermarks', lang)))
             cleaned_pdf_path, wm_count, wm_temp_path = clean_pdf_watermarks(
-                pdf_path, progress_callback=_progress, cancel_event=self.cancel_event
+                pdf_path, progress_callback=_progress, cancel_event=self.cancel_event, deep_analysis=deep_analysis
             )
             if self.cancel_event.is_set():
                 if wm_temp_path and os.path.exists(wm_temp_path):
@@ -1152,7 +1152,10 @@ class ImageProcessorService:
 
         self.ui_events.put(('status', get_backend_text('status_checking_watermarks', lang)))
         cleaned_pdf_path, wm_count, wm_temp_path = clean_pdf_watermarks(
-            pdf_path, progress_callback=_watermark_progress, cancel_event=self.cancel_event
+            pdf_path,
+            progress_callback=_watermark_progress,
+            cancel_event=self.cancel_event,
+            deep_analysis=settings.get('deep_analysis', False)
         )
         if self.cancel_event.is_set():
             if wm_temp_path and os.path.exists(wm_temp_path):

@@ -469,13 +469,11 @@ def _is_watermark_piece_info(piece_info):
         return False
 
 
-def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None, cancel_event=None):
+def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None, cancel_event=None, deep_analysis=False):
     """
-    检查并清除 PDF 中所有可识别的水印：
-    1. 注释水印 (/Annots: /Watermark, /Stamp, 或含水印关键字的注释)
-    2. Form XObject 水印 (含 /PieceInfo 水印标识、名称或内容含水印关键字的表单对象)
-    3. 内容流标准结构水印 (/Artifact << /Subtype /Watermark >> ... BDC ... EMC)
-    4. 附加图章/网站Logo叠加小图 (在多图扫描页中，面积远小于正文扫描图的小图水印)
+    检查并清除 PDF 中的水印：
+    - 常规模式：清理注释水印(/Annots)、结构标记(/Artifact)、Form XObject水印及面积比启发式叠加小图/Logo。
+    - 深度分析模式：不处理 PDF 的结构标记(/Artifact)、注释(/Annots)与叠加图层，严格仅去除跨页重复相同的重复水印。
 
     返回：(cleaned_pdf_path, watermark_count, temp_pdf_path)
     - 若未检测到水印：返回 (pdf_path, 0, None)，无需重复保存与写入。
@@ -490,6 +488,84 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
     if total_pages == 0:
         return pdf_path, 0, None
 
+    # --- 深度分析模式预扫描：跨页统计并识别在多页中“重复出现且完全相同”的水印对象 ---
+    duplicate_wm_obj_keys = set()
+    if deep_analysis and total_pages >= 2:
+        import hashlib
+        obj_page_map = {}
+        obj_is_secondary = {}
+        obj_has_wm_hint = {}
+
+        for p_idx, p in enumerate(reader.pages):
+            res = p.get('/Resources')
+            res_obj = res.get_object() if hasattr(res, 'get_object') else res
+            if not (res_obj and isinstance(res_obj, dict)):
+                continue
+            xobjs = res_obj.get('/XObject')
+            xobjs_obj = xobjs.get_object() if hasattr(xobjs, 'get_object') else xobjs
+            if not (xobjs_obj and isinstance(xobjs_obj, dict)):
+                continue
+
+            num_xobjs = len(xobjs_obj)
+            max_area = 0
+            obj_areas = {}
+            for k, v in xobjs_obj.items():
+                v_obj = v.get_object() if hasattr(v, 'get_object') else v
+                if not hasattr(v_obj, 'get'):
+                    continue
+                st = str(v_obj.get('/Subtype', ''))
+                w = int(v_obj.get('/Width', 0)) if st == '/Image' else 0
+                h = int(v_obj.get('/Height', 0)) if st == '/Image' else 0
+                area = w * h
+                obj_areas[k] = area
+                if area > max_area:
+                    max_area = area
+
+            for k, v in xobjs_obj.items():
+                v_obj = v.get_object() if hasattr(v, 'get_object') else v
+                if not hasattr(v_obj, 'get'):
+                    continue
+                ref = getattr(v_obj, 'indirect_reference', None)
+                if ref is not None:
+                    if hasattr(ref, 'idnum') and hasattr(ref, 'generation'):
+                        ref_key = (ref.idnum, ref.generation)
+                    else:
+                        ref_key = str(ref)
+                else:
+                    try:
+                        data = v_obj.get_data()
+                        ref_key = hashlib.md5(data).hexdigest() if data else id(v_obj)
+                    except Exception:
+                        ref_key = id(v_obj)
+
+                if ref_key not in obj_page_map:
+                    obj_page_map[ref_key] = set()
+                    obj_is_secondary[ref_key] = False
+                    obj_has_wm_hint[ref_key] = False
+
+                obj_page_map[ref_key].add(p_idx)
+
+                name_str = str(k).lower()
+                st = str(v_obj.get('/Subtype', ''))
+                if _is_watermark_xobj_name(name_str) or _is_watermark_piece_info(v_obj.get('/PieceInfo')):
+                    obj_has_wm_hint[ref_key] = True
+
+                # 多对象页面中非最大主图的对象标记为次要/叠加图层
+                if num_xobjs > 1:
+                    area = obj_areas.get(k, 0)
+                    if max_area > 0 and area < max_area * 0.9:
+                        obj_is_secondary[ref_key] = True
+                    elif st == '/Form':
+                        obj_is_secondary[ref_key] = True
+
+        for ref_key, pages in obj_page_map.items():
+            if len(pages) >= 2:
+                # 只有跨页面重复出现，且具备水印特征或属于次要叠加层的对象，才被判定为“重复水印”
+                if obj_has_wm_hint[ref_key] or obj_is_secondary[ref_key]:
+                    duplicate_wm_obj_keys.add(ref_key)
+                elif len(pages) >= max(2, int(total_pages * 0.4)) and total_pages >= 3:
+                    duplicate_wm_obj_keys.add(ref_key)
+
     writer = PdfWriter()
     total_watermarks_removed = 0
     pdf_was_modified = False
@@ -502,46 +578,48 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
         page_wm_count = 0
 
         # --- 1. 清理注释水印 (/Annots) ---
-        annots = page.get('/Annots')
-        if annots:
-            try:
-                annots_obj = annots.get_object() if hasattr(annots, 'get_object') else annots
-                if isinstance(annots_obj, (list, ArrayObject)):
-                    kept_annots = ArrayObject()
-                    for a in annots_obj:
-                        a_dict = a.get_object() if hasattr(a, 'get_object') else a
-                        if not isinstance(a_dict, dict):
-                            kept_annots.append(a)
-                            continue
+        # 深度分析模式不处理注释水印，完整保留注释图层
+        if not deep_analysis:
+            annots = page.get('/Annots')
+            if annots:
+                try:
+                    annots_obj = annots.get_object() if hasattr(annots, 'get_object') else annots
+                    if isinstance(annots_obj, (list, ArrayObject)):
+                        kept_annots = ArrayObject()
+                        for a in annots_obj:
+                            a_dict = a.get_object() if hasattr(a, 'get_object') else a
+                            if not isinstance(a_dict, dict):
+                                kept_annots.append(a)
+                                continue
 
-                        subtype = str(a_dict.get('/Subtype', ''))
-                        if subtype in ('/Watermark', '/Stamp'):
-                            page_wm_count += 1
-                            continue
+                            subtype = str(a_dict.get('/Subtype', ''))
+                            if subtype in ('/Watermark', '/Stamp'):
+                                page_wm_count += 1
+                                continue
 
-                        is_wm = False
-                        for k in ('/Contents', '/T', '/NM', '/Subj', '/RC'):
-                            val = a_dict.get(k)
-                            if val and _is_watermark_text(val):
-                                is_wm = True
-                                break
-                        if not is_wm:
-                            ap = a_dict.get('/AP')
-                            if ap and _is_watermark_text(ap):
-                                is_wm = True
+                            is_wm = False
+                            for k in ('/Contents', '/T', '/NM', '/Subj', '/RC'):
+                                val = a_dict.get(k)
+                                if val and _is_watermark_text(val):
+                                    is_wm = True
+                                    break
+                            if not is_wm:
+                                ap = a_dict.get('/AP')
+                                if ap and _is_watermark_text(ap):
+                                    is_wm = True
 
-                        if is_wm:
-                            page_wm_count += 1
-                        else:
-                            kept_annots.append(a)
+                            if is_wm:
+                                page_wm_count += 1
+                            else:
+                                kept_annots.append(a)
 
-                    if len(kept_annots) < len(annots_obj):
-                        if len(kept_annots) == 0:
-                            del page[NameObject('/Annots')]
-                        else:
-                            page[NameObject('/Annots')] = kept_annots
-            except Exception:
-                pass
+                        if len(kept_annots) < len(annots_obj):
+                            if len(kept_annots) == 0:
+                                del page[NameObject('/Annots')]
+                            else:
+                                page[NameObject('/Annots')] = kept_annots
+                except Exception:
+                    pass
 
         # --- 2. 识别并收集水印 XObject ---
         wm_xobj_names = set()
@@ -551,50 +629,73 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
             xobjs = res_obj.get('/XObject')
             xobjs_obj = xobjs.get_object() if hasattr(xobjs, 'get_object') else xobjs
             if isinstance(xobjs_obj, dict):
-                img_sizes = {}
-                for k, v in xobjs_obj.items():
-                    v_obj = v.get_object() if hasattr(v, 'get_object') else v
-                    if not hasattr(v_obj, 'get'):
-                        continue
-                    st = str(v_obj.get('/Subtype', ''))
-                    if st == '/Form':
-                        if _is_watermark_xobj_name(k) or _is_watermark_piece_info(v_obj.get('/PieceInfo')):
-                            wm_xobj_names.add(str(k))
+                if deep_analysis:
+                    # 深度分析模式：不根据单页面积比过滤叠加图层，严格只去除跨页重复相同的重复水印
+                    for k, v in xobjs_obj.items():
+                        v_obj = v.get_object() if hasattr(v, 'get_object') else v
+                        if not hasattr(v_obj, 'get'):
+                            continue
+                        ref = getattr(v_obj, 'indirect_reference', None)
+                        if ref is not None:
+                            if hasattr(ref, 'idnum') and hasattr(ref, 'generation'):
+                                ref_key = (ref.idnum, ref.generation)
+                            else:
+                                ref_key = str(ref)
                         else:
                             try:
-                                stream_data = v_obj.get_data()
-                                if stream_data and _is_watermark_text(stream_data.decode('latin1', errors='ignore')):
+                                data = v_obj.get_data()
+                                ref_key = hashlib.md5(data).hexdigest() if data else id(v_obj)
+                            except Exception:
+                                ref_key = id(v_obj)
+
+                        if ref_key in duplicate_wm_obj_keys:
+                            wm_xobj_names.add(str(k))
+                else:
+                    # 常规模式：原有的 Form/Image 水印特征与启发式小图过滤
+                    img_sizes = {}
+                    for k, v in xobjs_obj.items():
+                        v_obj = v.get_object() if hasattr(v, 'get_object') else v
+                        if not hasattr(v_obj, 'get'):
+                            continue
+                        st = str(v_obj.get('/Subtype', ''))
+                        if st == '/Form':
+                            if _is_watermark_xobj_name(k) or _is_watermark_piece_info(v_obj.get('/PieceInfo')):
+                                wm_xobj_names.add(str(k))
+                            else:
+                                try:
+                                    stream_data = v_obj.get_data()
+                                    if stream_data and _is_watermark_text(stream_data.decode('latin1', errors='ignore')):
+                                        wm_xobj_names.add(str(k))
+                                except Exception:
+                                    pass
+                        elif st == '/Image':
+                            try:
+                                w = int(v_obj.get('/Width', 0))
+                                h = int(v_obj.get('/Height', 0))
+                                img_sizes[k] = (w, h, v_obj)
+                                if _is_watermark_xobj_name(k):
                                     wm_xobj_names.add(str(k))
                             except Exception:
                                 pass
-                    elif st == '/Image':
-                        try:
-                            w = int(v_obj.get('/Width', 0))
-                            h = int(v_obj.get('/Height', 0))
-                            img_sizes[k] = (w, h, v_obj)
-                            if _is_watermark_xobj_name(k):
-                                wm_xobj_names.add(str(k))
-                        except Exception:
-                            pass
 
-                # 启发式：多图扫描页面中的水印/LOGO过滤
-                if len(img_sizes) > 1:
-                    max_k, (max_w, max_h, _) = max(img_sizes.items(), key=lambda item: item[1][0] * item[1][1])
-                    max_area = max_w * max_h
-                    if max_area >= 400000:
-                        for k, (w, h, obj) in img_sizes.items():
-                            if k == max_k:
-                                continue
-                            area = w * h
-                            ratio = area / max_area
-                            has_mask = bool(obj.get('/SMask') or obj.get('/Mask'))
-                            is_small = (w < 300 and h < 300) or area < 100000
-                            name_str = str(k).lower()
-                            has_wm_tag = any(sub in name_str for sub in ('logo', 'wm', 'mark', 'icon', 'stamp', 'ad', 'water', 'shuiyin'))
-                            if ratio < 0.15 and (has_mask or is_small or has_wm_tag or ratio < 0.05):
-                                wm_xobj_names.add(str(k))
+                    # 启发式：多图扫描页面中的水印/LOGO过滤
+                    if len(img_sizes) > 1:
+                        max_k, (max_w, max_h, _) = max(img_sizes.items(), key=lambda item: item[1][0] * item[1][1])
+                        max_area = max_w * max_h
+                        if max_area >= 400000:
+                            for k, (w, h, obj) in img_sizes.items():
+                                if k == max_k:
+                                    continue
+                                area = w * h
+                                ratio = area / max_area
+                                has_mask = bool(obj.get('/SMask') or obj.get('/Mask'))
+                                is_small = (w < 300 and h < 300) or area < 100000
+                                name_str = str(k).lower()
+                                has_wm_tag = any(sub in name_str for sub in ('logo', 'wm', 'mark', 'icon', 'stamp', 'ad', 'water', 'shuiyin'))
+                                if ratio < 0.15 and (has_mask or is_small or has_wm_tag or ratio < 0.05):
+                                    wm_xobj_names.add(str(k))
 
-        # --- 3. 清理内容流 (/Contents) 中的水印指令与 /Artifact 结构块 ---
+        # --- 3. 清理内容流 (/Contents) 中的指令 ---
         contents = page.get('/Contents')
         if contents:
             try:
@@ -607,7 +708,8 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
                     op_name = operator.decode('latin1') if isinstance(operator, bytes) else str(operator)
 
                     # 检测 /Artifact 结构标记块 (如 /Artifact << /Subtype /Watermark >> BDC)
-                    if op_name == 'BDC':
+                    # 深度分析模式不处理结构标记块，跳过对 BDC /Artifact 的清理
+                    if not deep_analysis and op_name == 'BDC':
                         op_str = str(operands)
                         is_wm_artifact = (
                             ('/Artifact' in op_str and ('/Watermark' in op_str or 'watermark' in op_str.lower()))
