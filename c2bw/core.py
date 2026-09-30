@@ -473,7 +473,7 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
     """
     检查并清除 PDF 中的水印：
     - 常规模式：清理注释水印(/Annots)、结构标记(/Artifact)、Form XObject水印及面积比启发式叠加小图/Logo。
-    - 深度分析模式：不处理 PDF 的结构标记(/Artifact)、注释(/Annots)与叠加图层，严格仅去除跨页重复相同的重复水印。
+    - 深度处理模式：不处理 PDF 的结构标记(/Artifact)、注释(/Annots)与叠加图层，严格仅去除跨页重复相同的重复水印。
 
     返回：(cleaned_pdf_path, watermark_count, temp_pdf_path)
     - 若未检测到水印：返回 (pdf_path, 0, None)，无需重复保存与写入。
@@ -909,7 +909,7 @@ def _select_bottom_layer_image(page, img_keys):
 
 
 def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, cancel_event=None, deep_analysis=False):
-    """使用 PyMuPDF/fitz 引擎进行全格式（含 JBIG2）图像提取，针对多图层严格仅提取最底层图片。支持深度分析 Pixmap 模式。"""
+    """使用 PyMuPDF/fitz 引擎进行全格式（含 JBIG2）图像提取，针对多图层严格仅提取最底层图片。支持深度处理 Pixmap 模式。"""
     os.makedirs(extract_dir, exist_ok=True)
     doc = fitz.open(pdf_path)
     try:
@@ -925,7 +925,7 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
 
             img_list = page.get_images()
 
-            # 深度分析模式：针对复杂特殊或多图层 PDF（如包含 OCG 图层、JBIG2 蒙版、前景文字与背景分层等），
+            # 深度处理模式：针对复杂特殊或多图层 PDF（如包含 OCG 图层、JBIG2 蒙版、前景文字与背景分层等），
             # 将整页的所有图层内容无缝复合渲染为用户在阅读器中浏览时的完整视图，再输出供后续转换处理。
             if deep_analysis:
                 try:
@@ -981,7 +981,7 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                     extracted_count += 1
 
                     if progress_callback:
-                        progress_callback(page_num, total_pages, f"正在进行深度分析整合多图层视图：{page_num} / {total_pages} 页...")
+                        progress_callback(page_num, total_pages, f"正在进行深度处理整合多图层视图：{page_num} / {total_pages} 页...")
                     continue
                 except Exception:
                     # 若复合渲染异常则平滑回退至单图层提取逻辑
@@ -1103,7 +1103,7 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                 continue
 
             if progress_callback:
-                status_text = f"正在进行深度分析渲染 PDF 图片：{page_num} / {total_pages} 页..." if deep_analysis else f"正在提取 PDF 原始图片：{page_num} / {total_pages} 页..."
+                status_text = f"正在进行深度处理渲染 PDF 图片：{page_num} / {total_pages} 页..." if deep_analysis else f"正在提取 PDF 原始图片：{page_num} / {total_pages} 页..."
                 progress_callback(page_num, total_pages, status_text)
 
         if extracted_count == 0:
@@ -1250,7 +1250,7 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
             print(f"[PDF Extract Warning] PyMuPDF 引擎执行异常: {_fe}，回退至 pypdf 引擎")
     else:
         if deep_analysis:
-            err_msg = f"深度分析模式需要 PyMuPDF (fitz) 引擎，当前运行环境未成功加载该引擎 ({_fitz_import_error or 'ModuleNotFoundError'})。"
+            err_msg = f"深度处理模式需要 PyMuPDF (fitz) 引擎，当前运行环境未成功加载该引擎 ({_fitz_import_error or 'ModuleNotFoundError'})。"
             return 0, err_msg
         if _fitz_import_error:
             print(f"[PDF Extract Notice] 未加载 PyMuPDF 引擎 ({_fitz_import_error})，回退至 pypdf 引擎")
@@ -1404,8 +1404,8 @@ REPORT_TEXTS = {
         'crop_overlap': "，中缝重叠 {overlap}%",
         'pdf_mode_no_conv': "- PDF 输出: 不转换为 PDF (仅保留处理后的图片文件)",
         'pdf_mode_reconstruct': "- PDF 输出: 合并为新 PDF 并自动清理临时分页图片",
-        'pdf_deep_analysis': "- 深度分析: {val}",
-        'deep_enabled': "已启用 (PyMuPDF Pixmap 渲染，多图层整合为一页)",
+        'pdf_deep_analysis': "- 深度处理: {val}",
+        'deep_enabled': "已启用 (合并视图后再做处理)",
         'deep_disabled': "未启用 (直接提取原始流)",
         'dir_mode_direct': "- PDF 输出: 直接打包为 PDF (保持原图格式与品质，无中间图片)",
         'dir_mode_merge': "- PDF 输出: 合并输出为单个 PDF ({detail})",
@@ -1471,8 +1471,8 @@ REPORT_TEXTS = {
         'crop_overlap': "，中縫重疊 {overlap}%",
         'pdf_mode_no_conv': "- PDF 輸出: 不轉換為 PDF (僅保留處理後的圖片檔案)",
         'pdf_mode_reconstruct': "- PDF 輸出: 合併為新 PDF 並自動清理臨時分頁圖片",
-        'pdf_deep_analysis': "- 深度分析: {val}",
-        'deep_enabled': "已啟用 (PyMuPDF Pixmap 渲染，多圖層整合為一頁)",
+        'pdf_deep_analysis': "- 深度處理: {val}",
+        'deep_enabled': "已啟用 (合併視圖後再做處理)",
         'deep_disabled': "未啟用 (直接提取原始流)",
         'dir_mode_direct': "- PDF 輸出: 直接打包為 PDF (保持原圖格式與品質，無中間圖片)",
         'dir_mode_merge': "- PDF 輸出: 合併輸出為單個 PDF ({detail})",
@@ -1538,8 +1538,8 @@ REPORT_TEXTS = {
         'crop_overlap': "，ノド重複 {overlap}%",
         'pdf_mode_no_conv': "- PDF 出力: PDFに変換しない (処理済み画像のみ保持)",
         'pdf_mode_reconstruct': "- PDF 出力: 新規PDFへ統合し一時画像を自動消去",
-        'pdf_deep_analysis': "- 高度な分析: {val}",
-        'deep_enabled': "有効 (PyMuPDF Pixmap 処理、複数レイヤーを1ページに統合)",
+        'pdf_deep_analysis': "- ディープ処理: {val}",
+        'deep_enabled': "有効 (複数レイヤーを結合してから処理)",
         'deep_disabled': "無効 (元のストリームを直接抽出)",
         'dir_mode_direct': "- PDF 出力: 直接PDFにパック (元の形式・品質を維持、中間画像なし)",
         'dir_mode_merge': "- PDF 出力: 単一PDFへ統合出力 ({detail})",
@@ -1605,8 +1605,8 @@ REPORT_TEXTS = {
         'crop_overlap': ", Gutter overlap {overlap}%",
         'pdf_mode_no_conv': "- PDF Output: Do not convert to PDF (Keep processed images only)",
         'pdf_mode_reconstruct': "- PDF Output: Merge into new PDF and clean temporary images",
-        'pdf_deep_analysis': "- Deep Analysis: {val}",
-        'deep_enabled': "Enabled (PyMuPDF Pixmap processing, composite multilayer into single page)",
+        'pdf_deep_analysis': "- Deep Processing: {val}",
+        'deep_enabled': "Enabled (Composite views before processing)",
         'deep_disabled': "Disabled (direct raw stream extract)",
         'dir_mode_direct': "- PDF Output: Directly pack into PDF (Keep original quality, no intermediate images)",
         'dir_mode_merge': "- PDF Output: Merge into a single PDF ({detail})",
