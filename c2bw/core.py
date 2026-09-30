@@ -1074,13 +1074,16 @@ def extract_images_from_pdf(pdf_path, extract_dir, progress_callback=None, cance
     return _extract_images_with_pypdf(pdf_path, extract_dir, progress_callback, cancel_event)
 
 
-def get_task_suffix(enable_crop, enable_binarize, size_opt_mode='original'):
+def get_task_suffix(enable_crop, enable_binarize, size_opt_mode='original', invert_binarize=False):
     """根据选择的处理任务生成对应的目录与文件后缀。"""
     parts = []
     if enable_crop:
         parts.append("已裁切")
     if enable_binarize:
-        parts.append("黑白版")
+        if invert_binarize:
+            parts.append("反相黑白版")
+        else:
+            parts.append("黑白版")
     elif size_opt_mode == 'mobile':
         parts.append("手机优化版")
     elif size_opt_mode == 'custom':
@@ -1200,6 +1203,7 @@ REPORT_TEXTS = {
         'bin_otsu': "局部动态自适应二值化 (默认)",
         'bin_threshold': "全局固定阈值二值化 (阈值: {val})",
         'bin_wolf': "Wolf 局部自适应二值化 (预设: {preset}，窗口: {window}，k: {k})",
+        'bin_invert_suffix': "，反相二值化",
         'fmt_keep': "保持原格式与品质",
         'fmt_original': "原大图片（无优化）",
         'fmt_original_pdf': "原大图片（清除水印）",
@@ -1263,6 +1267,7 @@ REPORT_TEXTS = {
         'bin_otsu': "局部動態自適應二值化 (預設)",
         'bin_threshold': "全域固定閾值二值化 (閾值: {val})",
         'bin_wolf': "Wolf 局部自適應二值化 (預設: {preset}，視窗: {window}，k: {k})",
+        'bin_invert_suffix': "，反相二值化",
         'fmt_keep': "保持原格式與品質",
         'fmt_original': "原大圖片（無優化）",
         'fmt_original_pdf': "原大圖片（清除水印）",
@@ -1326,6 +1331,7 @@ REPORT_TEXTS = {
         'bin_otsu': "大津の2値化 (デフォルト)",
         'bin_threshold': "固定閾値2値化 (閾値: {val})",
         'bin_wolf': "Wolf 局所適応的2値化 (プリセット: {preset}，ウィンドウ: {window}，k: {k})",
+        'bin_invert_suffix': "、反転2値化",
         'fmt_keep': "元の形式と品質を維持",
         'fmt_original': "原寸大（最適化なし）",
         'fmt_original_pdf': "原寸大（透かし消去）",
@@ -1389,6 +1395,7 @@ REPORT_TEXTS = {
         'bin_otsu': "OTSU Adaptive (Default)",
         'bin_threshold': "Fixed Threshold (Threshold: {val})",
         'bin_wolf': "Wolf Local Adaptive (Preset: {preset}, Window: {window}, k: {k})",
+        'bin_invert_suffix': ", Invert B&W",
         'fmt_keep': "Keep Original Format & Quality",
         'fmt_original': "Original Size (No Optimization)",
         'fmt_original_pdf': "Original Size (Remove Watermarks)",
@@ -1794,6 +1801,7 @@ def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options
         final_img = None
         try:
             gray_img = pil_img.convert('L')
+            invert_bin = bool(settings.get('invert_binarize', False))
 
             bin_method = str(settings.get('bin_method', '0'))
             if bin_method == 'wolf':
@@ -1804,12 +1812,17 @@ def save_image(pil_img, out_path_base, original_ext, settings, jpeg_save_options
                 final_img = wolf_binarize(gray_img, window=window, k=k)
             elif bin_method == '0':
                 t_val = calculate_otsu_threshold(gray_img)
-                lut = [255 if p > t_val else 0 for p in range(256)]
+                lut = [0 if p > t_val else 255 for p in range(256)] if invert_bin else [255 if p > t_val else 0 for p in range(256)]
                 final_img = gray_img.point(lut, mode='1')
             else:
                 t_val = int((settings.get('threshold_val', 50) / 100.0) * 255)
-                lut = [255 if p > t_val else 0 for p in range(256)]
+                lut = [0 if p > t_val else 255 for p in range(256)] if invert_bin else [255 if p > t_val else 0 for p in range(256)]
                 final_img = gray_img.point(lut, mode='1')
+
+            if invert_bin and bin_method == 'wolf':
+                inverted = final_img.point(lambda p: 0 if p else 255, mode='1')
+                final_img.close()
+                final_img = inverted
 
             output_path = f"{out_path_base}.tif"
             tiffinfo = TiffImagePlugin.ImageFileDirectory_v2()
@@ -2180,6 +2193,8 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
             m = t['bin_otsu']
         else:
             m = t['bin_threshold'].format(val=settings.get('threshold_val', 50))
+        if settings.get('invert_binarize'):
+            m += t.get('bin_invert_suffix', '，反相二值化')
         lines.append(t['color_enabled'].format(detail=m))
 
     else:

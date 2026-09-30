@@ -648,6 +648,7 @@ class ImageProcessorApp:
         self.include_subfolders = tk.BooleanVar(value=False)
         
         self.enable_binarize = tk.BooleanVar(value=True) 
+        self.invert_binarize = tk.BooleanVar(value=False)
         self.bin_method = tk.StringVar(value="0") 
         self.threshold_val = tk.IntVar(value=50)
         self.wolf_preset = tk.StringVar(value="standard")
@@ -828,6 +829,8 @@ class ImageProcessorApp:
         self.wolf_preset_combo.current(1)
         self.wolf_preset_combo.bind("<<ComboboxSelected>>", self.on_wolf_preset_change)
 
+        self.cb_invert = ttk.Checkbutton(self.bin_options_frame, text="反相二值化（黑白）图片", variable=self.invert_binarize)
+        self.cb_invert.grid(row=2, column=1, sticky=tk.W, pady=(4, 2))
 
         # 新增：取消二值化时的文件大小优化选择
         self.non_bin_options_frame = ttk.Frame(bin_frame)
@@ -1248,6 +1251,7 @@ class ImageProcessorApp:
         self.rb_otsu.config(state=state)
         self.rb_custom.config(state=state)
         self.rb_wolf.config(state=state)
+        self.cb_invert.config(state=state)
         if not self.enable_binarize.get():
             self.thresh_entry.config(state=tk.DISABLED)
             self.wolf_preset_combo.config(state=tk.DISABLED)
@@ -1482,6 +1486,7 @@ class ImageProcessorApp:
                 'include_subfolders': self.include_subfolders.get(),
                 'keep_images_after_pdf': self.keep_images_after_pdf.get(),
                 'enable_binarize': self.enable_binarize.get(),
+                'invert_binarize': self.invert_binarize.get(),
                 'bin_method': self.bin_method.get(),
                 'threshold_val': self.threshold_val.get(),
                 'wolf_preset': self.wolf_preset.get(),
@@ -1573,10 +1578,11 @@ class ImageProcessorApp:
             pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
             enable_crop = self.enable_crop.get()
             enable_binarize = self.enable_binarize.get()
+            invert_binarize = self.invert_binarize.get()
             no_convert_pdf = self.pdf_no_convert.get()
 
             size_opt_mode = self.size_opt_mode.get()
-            suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
+            suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode, invert_binarize=invert_binarize)
             task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
             if no_convert_pdf:
                 final_pdf_path = ''
@@ -1626,6 +1632,7 @@ class ImageProcessorApp:
                 'include_subfolders': False,
                 'no_convert_pdf': no_convert_pdf,
                 'enable_binarize': enable_binarize,
+                'invert_binarize': invert_binarize,
                 'bin_method': self.bin_method.get(),
                 'threshold_val': thresh,
                 'wolf_preset': self.wolf_preset.get(),

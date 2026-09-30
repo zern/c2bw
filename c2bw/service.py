@@ -246,6 +246,7 @@ class ImageProcessorService:
                 'include_subfolders': bool(raw_settings.get('include_subfolders', False)),
                 'keep_images_after_pdf': bool(raw_settings.get('keep_images_after_pdf', False)),
                 'enable_binarize': bool(raw_settings.get('enable_binarize', True)),
+                'invert_binarize': bool(raw_settings.get('invert_binarize', False)),
                 'bin_method': str(raw_settings.get('bin_method', '0')),
                 'threshold_val': int(raw_settings.get('threshold_val', 50)),
                 'wolf_preset': str(raw_settings.get('wolf_preset', 'standard')),
@@ -324,6 +325,7 @@ class ImageProcessorService:
 
             enable_crop = bool(raw_settings.get('enable_crop', True))
             enable_binarize = bool(raw_settings.get('enable_binarize', True))
+            invert_binarize = bool(raw_settings.get('invert_binarize', False))
             no_convert_pdf = bool(raw_settings.get('no_convert_pdf', False))
 
             size_opt_mode = str(raw_settings.get('size_opt_mode', '')).strip()
@@ -352,7 +354,7 @@ class ImageProcessorService:
                 base_dir = os.path.dirname(pdf_path)
 
             pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
-            suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode)
+            suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode, invert_binarize=invert_binarize)
             task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
             if no_convert_pdf:
                 final_pdf_path = ''
@@ -370,6 +372,7 @@ class ImageProcessorService:
                 'include_subfolders': False,
                 'no_convert_pdf': no_convert_pdf,
                 'enable_binarize': enable_binarize,
+                'invert_binarize': invert_binarize,
                 'bin_method': str(raw_settings.get('bin_method', '0')),
                 'threshold_val': int(raw_settings.get('threshold_val', 50)),
                 'wolf_preset': str(raw_settings.get('wolf_preset', 'standard')),

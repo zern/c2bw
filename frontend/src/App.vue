@@ -340,6 +340,12 @@
                 style="width: 90px;"
               />
             </div>
+            <div class="setting-row compact-row" style="margin-top: 8px;">
+              <span class="setting-label">{{ t('labelInvertBinarize') }}</span>
+              <el-checkbox v-model="form.invert_binarize" :disabled="processing">
+                {{ t('chkInvertBinarize') }}
+              </el-checkbox>
+            </div>
             <p class="setting-tip">{{ form.bin_method === 'wolf' ? t('tipWolf') : t('tipBinarize') }}</p>
           </div>
 
@@ -726,6 +732,7 @@ const form = reactive({
   include_subfolders: false,
   keep_images_after_pdf: false,
   enable_binarize: true,
+  invert_binarize: false,
   bin_method: '0',
   threshold_val: 50,
   wolf_preset: 'standard',
@@ -816,11 +823,11 @@ const computedPdfTargetDir = computed(() => {
   const stem = dotIdx >= 0 ? filename.substring(0, dotIdx) : filename
   let suffix = ''
   if (form.enable_crop && form.enable_binarize) {
-    suffix = t('pdfSuffixCroppedBin')
+    suffix = form.invert_binarize ? t('pdfSuffixCroppedInvBin') : t('pdfSuffixCroppedBin')
   } else if (form.enable_crop) {
     suffix = t('pdfSuffixCropped')
   } else if (form.enable_binarize) {
-    suffix = t('pdfSuffixBin')
+    suffix = form.invert_binarize ? t('pdfSuffixInvBin') : t('pdfSuffixBin')
   } else if (form.size_opt_mode === 'mobile') {
     suffix = t('pdfSuffixMobile')
   } else if (form.size_opt_mode === 'custom') {
