@@ -770,7 +770,7 @@ class ImageProcessorApp:
 
         ttk.Checkbutton(
             self.pdf_frame,
-            text="深度分析 (针对复杂、特殊的PDF，勾选后任务默认调用 PyMuPDF Pixmap处理)",
+            text="深度分析 (针对复杂、特殊PDF，默认调用 PyMuPDF Pixmap处理，多图层整合为一页)",
             variable=self.pdf_deep_analysis,
         ).grid(row=4, column=1, sticky=tk.W, pady=3, padx=5)
 

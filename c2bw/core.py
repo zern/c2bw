@@ -808,6 +808,7 @@ def _select_bottom_layer_image(page, img_keys):
 
 def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, cancel_event=None, deep_analysis=False):
     """使用 PyMuPDF/fitz 引擎进行全格式（含 JBIG2）图像提取，针对多图层严格仅提取最底层图片。支持深度分析 Pixmap 模式。"""
+    os.makedirs(extract_dir, exist_ok=True)
     doc = fitz.open(pdf_path)
     try:
         total_pages = len(doc)
@@ -852,6 +853,49 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
 
             if not unique_xrefs:
                 continue
+
+            # 深度分析模式：针对包含多图层的 PDF 页面，将所有图层复合整合为单一页面输出
+            if deep_analysis and len(unique_xrefs) > 1:
+                try:
+                    # 计算页面内所有图片对象的原生最大 DPI，确保渲染画质与原图一致
+                    max_img_dpi = 300.0
+                    for x in unique_xrefs:
+                        try:
+                            meta = doc.extract_image(x)
+                            w = meta.get("width", 0)
+                            h = meta.get("height", 0)
+                            rects = page.get_image_rects(x)
+                            if rects and rects[0].width > 0 and rects[0].height > 0:
+                                dpi_x = (w / rects[0].width) * 72.0
+                                dpi_y = (h / rects[0].height) * 72.0
+                                max_img_dpi = max(max_img_dpi, dpi_x, dpi_y)
+                            elif page.rect.width > 0 and page.rect.height > 0:
+                                dpi_w = (w / page.rect.width) * 72.0
+                                dpi_h = (h / page.rect.height) * 72.0
+                                max_img_dpi = max(max_img_dpi, dpi_w, dpi_h)
+                        except Exception:
+                            pass
+
+                    render_dpi = int(round(max(300.0, min(max_img_dpi, 600.0))))
+                    # 整页多图层复合渲染为单一 Pixmap（alpha=False 使用白色背景混合合成）
+                    pix = page.get_pixmap(dpi=render_dpi, alpha=False)
+                    if pix.n - pix.alpha > 3:
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+                    data = pix.tobytes("png")
+                    ext = ".png"
+
+                    filename = f"page_{page_num:04d}{ext}"
+                    save_path = os.path.join(extract_dir, filename)
+                    with open(save_path, "wb") as f:
+                        f.write(data)
+                    extracted_count += 1
+
+                    if progress_callback:
+                        progress_callback(page_num, total_pages, f"正在进行深度分析整合多图层：{page_num} / {total_pages} 页...")
+                    continue
+                except Exception:
+                    # 若复合渲染异常则平滑回退至单图层提取逻辑
+                    pass
 
             # 多个图层时仅保留最底层的图片：
             # 1. 过滤作为 /SMask 遮罩引用的 xref
@@ -1253,7 +1297,7 @@ REPORT_TEXTS = {
         'pdf_mode_no_conv': "- PDF 输出: 不转换为 PDF (仅保留处理后的图片文件)",
         'pdf_mode_reconstruct': "- PDF 输出: 合并为新 PDF 并自动清理临时分页图片",
         'pdf_deep_analysis': "- 深度分析: {val}",
-        'deep_enabled': "已启用 (PyMuPDF Pixmap 渲染)",
+        'deep_enabled': "已启用 (PyMuPDF Pixmap 渲染，多图层整合为一页)",
         'deep_disabled': "未启用 (直接提取原始流)",
         'dir_mode_direct': "- PDF 输出: 直接打包为 PDF (保持原图格式与品质，无中间图片)",
         'dir_mode_merge': "- PDF 输出: 合并输出为单个 PDF ({detail})",
@@ -1320,7 +1364,7 @@ REPORT_TEXTS = {
         'pdf_mode_no_conv': "- PDF 輸出: 不轉換為 PDF (僅保留處理後的圖片檔案)",
         'pdf_mode_reconstruct': "- PDF 輸出: 合併為新 PDF 並自動清理臨時分頁圖片",
         'pdf_deep_analysis': "- 深度分析: {val}",
-        'deep_enabled': "已啟用 (PyMuPDF Pixmap 渲染)",
+        'deep_enabled': "已啟用 (PyMuPDF Pixmap 渲染，多圖層整合為一頁)",
         'deep_disabled': "未啟用 (直接提取原始流)",
         'dir_mode_direct': "- PDF 輸出: 直接打包為 PDF (保持原圖格式與品質，無中間圖片)",
         'dir_mode_merge': "- PDF 輸出: 合併輸出為單個 PDF ({detail})",
@@ -1387,7 +1431,7 @@ REPORT_TEXTS = {
         'pdf_mode_no_conv': "- PDF 出力: PDFに変換しない (処理済み画像のみ保持)",
         'pdf_mode_reconstruct': "- PDF 出力: 新規PDFへ統合し一時画像を自動消去",
         'pdf_deep_analysis': "- 高度な分析: {val}",
-        'deep_enabled': "有効 (PyMuPDF Pixmap 処理)",
+        'deep_enabled': "有効 (PyMuPDF Pixmap 処理、複数レイヤーを1ページに統合)",
         'deep_disabled': "無効 (元のストリームを直接抽出)",
         'dir_mode_direct': "- PDF 出力: 直接PDFにパック (元の形式・品質を維持、中間画像なし)",
         'dir_mode_merge': "- PDF 出力: 単一PDFへ統合出力 ({detail})",
@@ -1454,7 +1498,7 @@ REPORT_TEXTS = {
         'pdf_mode_no_conv': "- PDF Output: Do not convert to PDF (Keep processed images only)",
         'pdf_mode_reconstruct': "- PDF Output: Merge into new PDF and clean temporary images",
         'pdf_deep_analysis': "- Deep Analysis: {val}",
-        'deep_enabled': "Enabled (PyMuPDF Pixmap processing)",
+        'deep_enabled': "Enabled (PyMuPDF Pixmap processing, composite multilayer into single page)",
         'deep_disabled': "Disabled (direct raw stream extract)",
         'dir_mode_direct': "- PDF Output: Directly pack into PDF (Keep original quality, no intermediate images)",
         'dir_mode_merge': "- PDF Output: Merge into a single PDF ({detail})",
