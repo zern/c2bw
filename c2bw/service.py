@@ -355,11 +355,16 @@ class ImageProcessorService:
 
             pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
             suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode, invert_binarize=invert_binarize)
-            task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
             if no_convert_pdf:
+                task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
                 final_pdf_path = ''
             else:
-                final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
+                out_stem = f"{pdf_name}{suffix}"
+                candidate_pdf = os.path.abspath(os.path.join(base_dir, f"{out_stem}.pdf"))
+                if os.path.normcase(candidate_pdf) == os.path.normcase(os.path.abspath(pdf_path)):
+                    candidate_pdf = os.path.abspath(os.path.join(base_dir, f"{pdf_name}_已去水印.pdf"))
+                final_pdf_path = candidate_pdf
+                task_dir = os.path.join(base_dir, f"._c2bw_tmp_{pdf_name}{suffix}")
 
             settings = {
                 'work_mode': 'pdf',
@@ -1346,6 +1351,11 @@ class ImageProcessorService:
         )
 
         if self.cancel_event.is_set():
+            if final_pdf and os.path.exists(final_pdf):
+                try:
+                    os.remove(final_pdf)
+                except Exception:
+                    pass
             self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'], lang=lang)))
             return
 
@@ -1355,21 +1365,8 @@ class ImageProcessorService:
 
         self.ui_events.put(('status', get_backend_text('status_cleaning_temp', lang)))
         try:
-            if os.path.isdir(out_dir):
-                shutil.rmtree(out_dir, ignore_errors=True)
-            for fname in os.listdir(raw_dir):
-                fpath = os.path.join(raw_dir, fname)
-                if os.path.normcase(os.path.abspath(fpath)) == os.path.normcase(os.path.abspath(final_pdf)):
-                    continue
-                if fname.lower() in ['task_report.txt', 'task_log.txt']:
-                    continue
-                try:
-                    if os.path.isfile(fpath) or os.path.islink(fpath):
-                        os.remove(fpath)
-                    elif os.path.isdir(fpath):
-                        shutil.rmtree(fpath, ignore_errors=True)
-                except OSError:
-                    pass
+            if os.path.isdir(raw_dir):
+                shutil.rmtree(raw_dir, ignore_errors=True)
         except Exception:
             pass
 
@@ -1388,7 +1385,8 @@ class ImageProcessorService:
             'pdf_bookmarks_imported': settings.get('pdf_bookmarks_imported'),
         }
         summary_msg = self._build_and_save_task_report(
-            summary, raw_dir,
+            summary, None,
+            save_report=False,
             pdf_path=final_pdf,
             pdf_count=1,
             keep_images=False,

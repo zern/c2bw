@@ -2544,9 +2544,12 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
     return '\n'.join(lines)
 
 
-def build_task_report(summary, target_dir, **kwargs):
-    """生成任务报告文本并在目标目录输出 task_report.txt 文件。"""
-    report_file = os.path.join(target_dir, "task_report.txt") if (target_dir and os.path.isdir(target_dir)) else None
+def build_task_report(summary, target_dir, save_report=True, **kwargs):
+    """生成任务报告文本并在目标目录输出 task_report.txt 文件（若 save_report=False 或 target_dir 为空则不写文件）。"""
+    if save_report and target_dir and os.path.isdir(target_dir):
+        report_file = os.path.join(target_dir, "task_report.txt")
+    else:
+        report_file = None
     summary['report_file'] = report_file
     report_text = completion_text(summary, **kwargs)
     if report_file:

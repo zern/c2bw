@@ -1053,11 +1053,14 @@ class ImageProcessorApp:
         else:
             base_dir = os.path.dirname(os.path.abspath(path))
         pdf_name = os.path.splitext(os.path.basename(path))[0]
-        suffix = get_task_suffix(self.enable_crop.get(), self.enable_binarize.get(), size_opt_mode=self.size_opt_mode.get())
-        if not suffix:
-            self.pdf_target_preview.set(os.path.join(base_dir, pdf_name))
-        else:
+        suffix = get_task_suffix(self.enable_crop.get(), self.enable_binarize.get(), size_opt_mode=self.size_opt_mode.get(), invert_binarize=self.invert_binarize.get())
+        if self.pdf_no_convert.get():
             self.pdf_target_preview.set(os.path.join(base_dir, f"{pdf_name}{suffix}"))
+        else:
+            candidate_pdf = os.path.join(base_dir, f"{pdf_name}{suffix}.pdf")
+            if os.path.normcase(os.path.abspath(candidate_pdf)) == os.path.normcase(os.path.abspath(path)):
+                candidate_pdf = os.path.join(base_dir, f"{pdf_name}_已去水印.pdf")
+            self.pdf_target_preview.set(candidate_pdf)
 
     def select_pdf_output_dir(self):
         initial = self.pdf_output_dir.get().strip()
@@ -1087,12 +1090,12 @@ class ImageProcessorApp:
             else:
                 if not self.enable_crop.get() and not self.enable_binarize.get() and self.size_opt_mode.get() == 'original':
                     self.pdf_hint_label.config(
-                        text="提示: 仅清除 PDF 中可清除的水印，并打包输出至同名目录与同名 PDF",
+                        text="提示: 仅清除水印，并直接生成新 PDF 至输出目录下",
                         foreground="#059669"
                     )
                 else:
                     self.pdf_hint_label.config(
-                        text="提示: 提取原图并完成处理后，将自动合并为新 PDF 并删除临时分页图片",
+                        text="提示: 提取原图并完成处理后，将直接合并生成新 PDF 至输出目录下，不创建同名文件夹",
                         foreground="#0284c7"
                     )
 
@@ -1590,11 +1593,16 @@ class ImageProcessorApp:
 
             size_opt_mode = self.size_opt_mode.get()
             suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode, invert_binarize=invert_binarize)
-            task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
             if no_convert_pdf:
+                task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
                 final_pdf_path = ''
             else:
-                final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
+                out_stem = f"{pdf_name}{suffix}"
+                candidate_pdf = os.path.abspath(os.path.join(base_dir, f"{out_stem}.pdf"))
+                if os.path.normcase(candidate_pdf) == os.path.normcase(os.path.abspath(pdf_path)):
+                    candidate_pdf = os.path.abspath(os.path.join(base_dir, f"{pdf_name}_已去水印.pdf"))
+                final_pdf_path = candidate_pdf
+                task_dir = os.path.join(base_dir, f"._c2bw_tmp_{pdf_name}{suffix}")
 
             try:
                 threads = self.max_threads.get()
@@ -1671,10 +1679,9 @@ class ImageProcessorApp:
                         f"将对 PDF 依次执行：\n"
                         f"1. 从 PDF 提取原始分页图片并清除水印\n"
                         f"2. 保持原始尺寸与格式输出\n"
-                        f"3. 汇总生成新 PDF\n"
-                        f"4. 自动清理临时分页图片，仅保留新 PDF\n\n"
+                        f"3. 汇总直接生成新 PDF 至输出目录下\n"
+                        f"4. 自动清理临时工作文件，不创建多余文件夹与日志\n\n"
                         f"PDF 文件：{pdf_path}\n"
-                        f"生成目录：{task_dir}\n"
                         f"输出文件：{final_pdf_path}\n\n"
                         f"是否确认开始？"
                     )
@@ -1693,10 +1700,9 @@ class ImageProcessorApp:
                     f"将对 PDF 依次执行：\n"
                     f"1. 从 PDF 提取原始分页图片并清除水印\n"
                     f"2. 按勾选任务批量处理\n"
-                    f"3. 汇总生成新 PDF\n"
-                    f"4. 自动清理临时分页图片，仅保留新 PDF\n\n"
+                    f"3. 汇总直接生成新 PDF 至输出目录下\n"
+                    f"4. 自动清理临时工作文件，不创建多余文件夹与日志\n\n"
                     f"PDF 文件：{pdf_path}\n"
-                    f"生成目录：{task_dir}\n"
                     f"输出文件：{final_pdf_path}\n\n"
                     f"是否确认开始？"
                 )
