@@ -5,58 +5,9 @@ c2bw 桌面应用启动入口
 import os
 import sys
 
-def _setup_bundle_environment():
-    """兼容 Nuitka / PyInstaller 单文件打包运行环境：将临时解压目录加入 sys.path 与 DLL 搜索路径。"""
-    bundle_dirs = []
-    
-    # 1. PyInstaller 模式
-    if hasattr(sys, '_MEIPASS'):
-        bundle_dirs.append(getattr(sys, '_MEIPASS'))
-        
-    # 2. Nuitka __compiled__ 结构体模式（Nuitka 官方标准解压目录位置）
-    compiled_info = getattr(sys.modules.get('__main__'), '__compiled__', None) or globals().get('__compiled__')
-    if compiled_info is not None:
-        if hasattr(compiled_info, 'containing_dir') and compiled_info.containing_dir:
-            bundle_dirs.append(compiled_info.containing_dir)
-        elif len(compiled_info) > 4 and compiled_info[4]:
-            bundle_dirs.append(compiled_info[4])
-            
-    # 3. 环境变量与当前脚本目录
-    if os.environ.get("NUITKA_ONEFILE_DIRECTORY"):
-        bundle_dirs.append(os.environ.get("NUITKA_ONEFILE_DIRECTORY"))
-    if '__file__' in globals():
-        bundle_dirs.append(os.path.dirname(os.path.abspath(__file__)))
-        
-    # 4. 可执行文件同级目录
-    bundle_dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
-    
-    # 5. TEMP 扫描保底：仅当未获得有效解压目录时作为后备，且仅取最新的单个目录
-    if not os.environ.get("NUITKA_ONEFILE_DIRECTORY") and not hasattr(sys, '_MEIPASS'):
-        temp_dir = os.environ.get('TEMP')
-        if temp_dir and os.path.exists(temp_dir):
-            import glob
-            matches = sorted(glob.glob(os.path.join(temp_dir, 'onefile_*')), key=os.path.getmtime, reverse=True)
-            if matches:
-                bundle_dirs.append(matches[0])
+from c2bw._env import setup_bundle_environment
 
-    for _bdir in bundle_dirs:
-        if _bdir and os.path.exists(_bdir):
-            if _bdir not in sys.path:
-                sys.path.insert(0, _bdir)
-            _mpdir = os.path.join(_bdir, 'pymupdf')
-            if hasattr(os, 'add_dll_directory'):
-                try:
-                    os.add_dll_directory(_bdir)
-                except Exception:
-                    pass
-                if os.path.exists(_mpdir):
-                    try:
-                        os.add_dll_directory(_mpdir)
-                    except Exception:
-                        pass
-            os.environ['PATH'] = _bdir + os.pathsep + _mpdir + os.pathsep + os.environ.get('PATH', '')
-
-_setup_bundle_environment()
+setup_bundle_environment(__file__ if '__file__' in globals() else None)
 
 import multiprocessing
 

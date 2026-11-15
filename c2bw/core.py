@@ -22,49 +22,10 @@ from pypdf.generic import (
 from pypdf.filters import decode_stream_data
 import pypdf.filters
 
+from c2bw._env import setup_bundle_environment
+
 # 兼容 Nuitka / PyInstaller 单文件打包运行环境
-def _setup_core_bundle_env():
-    bundle_dirs = []
-    if hasattr(sys, '_MEIPASS'):
-        bundle_dirs.append(getattr(sys, '_MEIPASS'))
-    compiled_info = getattr(sys.modules.get('__main__'), '__compiled__', None) or globals().get('__compiled__')
-    if compiled_info is not None:
-        if hasattr(compiled_info, 'containing_dir') and compiled_info.containing_dir:
-            bundle_dirs.append(compiled_info.containing_dir)
-        elif len(compiled_info) > 4 and compiled_info[4]:
-            bundle_dirs.append(compiled_info[4])
-    if os.environ.get("NUITKA_ONEFILE_DIRECTORY"):
-        bundle_dirs.append(os.environ.get("NUITKA_ONEFILE_DIRECTORY"))
-    if '__file__' in globals():
-        bundle_dirs.append(os.path.dirname(os.path.abspath(__file__)))
-    bundle_dirs.append(os.path.dirname(os.path.abspath(sys.executable)))
-    # 5. TEMP 扫描保底：仅当未获得有效解压目录时作为后备，且仅取最新的单个目录
-    if not os.environ.get("NUITKA_ONEFILE_DIRECTORY") and not hasattr(sys, '_MEIPASS'):
-        temp_dir = os.environ.get('TEMP')
-        if temp_dir and os.path.exists(temp_dir):
-            import glob
-            matches = sorted(glob.glob(os.path.join(temp_dir, 'onefile_*')), key=os.path.getmtime, reverse=True)
-            if matches:
-                bundle_dirs.append(matches[0])
-
-    for _bdir in bundle_dirs:
-        if _bdir and os.path.exists(_bdir):
-            if _bdir not in sys.path:
-                sys.path.insert(0, _bdir)
-            _mpdir = os.path.join(_bdir, 'pymupdf')
-            if hasattr(os, 'add_dll_directory'):
-                try:
-                    os.add_dll_directory(_bdir)
-                except Exception:
-                    pass
-                if os.path.exists(_mpdir):
-                    try:
-                        os.add_dll_directory(_mpdir)
-                    except Exception:
-                        pass
-            os.environ['PATH'] = _bdir + os.pathsep + _mpdir + os.pathsep + os.environ.get('PATH', '')
-
-_setup_core_bundle_env()
+setup_bundle_environment(__file__ if '__file__' in globals() else None)
 
 # 全格式极速无损提取引擎（优先使用 PyMuPDF/pymupdf，支持 JBIG2、JPEG、TIFF、Flate 等）
 _fitz_import_error = None
@@ -90,6 +51,9 @@ pypdf.filters.ASCIIHexDecode.decode = staticmethod(_safe_asciihex_decode)
 
 PDF_APPLICATION_NAME = "SHUGE.ORG"
 PDF_SPEC_VERSION = b"%PDF-1.5"
+
+# 纯黑白 8 位灰度（仅含 0 与 255）直转 1 位的查找表：0 → 黑(0)，其余 → 白(255)
+_BILEVEL_L_TO_ONE_LUT = [0] + [255] * 255
 
 def _resolve_pdf_xobject(page, img_id):
     """从页面对象中解析指定 ID 的 XObject 数据流对象。"""
@@ -337,6 +301,151 @@ def _normalize_extracted_tiff(data):
     return data
 
 
+def _wrap_g4_stream_as_tiff(ccitt_data, width, height, photometric=1, dpi=None):
+    """
+    把 CCITT Group 4 (T.6) 原生压缩数据装进最小化单 Strip TIFF 容器（PIL / libtiff 可直接解码）。
+
+    PDF 的 /CCITTFaxDecode(K=-1) 与 TIFF 的 Compression=4 数据编码完全一致，因此无需解码重编码。
+    photometric: 1 = BlackIsZero（位 1 为黑），0 = WhiteIsZero（位 0 为黑）。
+    dpi: (x, y) 解析度；写入 Resolution 标签后，重新打包 PDF 时可还原原始页面尺寸。
+    """
+    entries = [
+        (256, 3, 1, width),        # ImageWidth
+        (257, 3, 1, height),       # ImageLength
+        (258, 3, 1, 1),            # BitsPerSample
+        (259, 3, 1, 4),            # Compression = CCITT Group 4
+        (262, 3, 1, photometric),  # PhotometricInterpretation
+        (266, 3, 1, 1),            # FillOrder = 高位优先（与 PDF 一致）
+        (273, 4, 1, None),         # StripOffsets（下面回填）
+        (278, 3, 1, height),       # RowsPerStrip = 图高，强制单 Strip
+        (279, 4, 1, len(ccitt_data)),  # StripByteCounts
+    ]
+    has_dpi = bool(dpi and dpi[0] and dpi[1] and dpi[0] > 0 and dpi[1] > 0)
+    if has_dpi:
+        entries.append((282, 5, 1, None))  # XResolution（RATIONAL，值区在后面）
+        entries.append((283, 5, 1, None))  # YResolution
+
+    ifd_end = 8 + 2 + 12 * len(entries) + 4
+    rationals_offset = ifd_end
+    data_offset = ifd_end + (16 if has_dpi else 0)
+
+    if has_dpi:
+        dpi_values = (
+            struct.pack('<II', int(round(float(dpi[0]) * 100)), 100)
+            + struct.pack('<II', int(round(float(dpi[1]) * 100)), 100)
+        )
+    else:
+        dpi_values = b''
+
+    out = bytearray(b'II')
+    out += struct.pack('<HI', 42, 8)
+    out += struct.pack('<H', len(entries))
+    for index, (tag, typ, count, value) in enumerate(entries):
+        if tag == 273:
+            value = data_offset
+        elif tag == 282:
+            value = rationals_offset
+        elif tag == 283:
+            value = rationals_offset + 8
+        if typ == 3:
+            out += struct.pack('<HHIHH', tag, typ, count, value, 0)
+        else:
+            out += struct.pack('<HHII', tag, typ, count, value)
+    out += struct.pack('<I', 0)
+    if len(out) != ifd_end:
+        raise ValueError(f'TIFF 头长度异常: {len(out)} != {ifd_end}')
+    out += dpi_values
+    if len(out) != data_offset:
+        raise ValueError(f'TIFF 数据偏移异常: {len(out)} != {data_offset}')
+    out += ccitt_data
+    return bytes(out)
+
+
+def _ccitt_g4_tiff_from_xref(doc, xref, width, height, dpi=None):
+    """
+    尝试把 PDF 中 CCITT Group 4 二值图的压缩流直接封装为单 Strip G4 TIFF，完全跳过
+    MuPDF 的「解码 → 重新编码 PNG」过程。返回 TIFF 字节流；任何不确定情形均返回 None，
+    由调用方回退到原有的 extract_image / Pixmap 路径。
+
+    仅接受与 TIFF T.6 完全等价的情形：单一 /CCITTFaxDecode 滤镜、K = -1、非图像蒙版、
+    无 /SMask 与 /Decode、无 EncodedByteAlign / EndOfLine、Columns/Rows 与图像尺寸一致。
+    """
+    if width <= 0 or height <= 0:
+        return None
+
+    def key(name):
+        try:
+            return doc.xref_get_key(xref, name)
+        except Exception:
+            return ('null', 'null')
+
+    if key('Filter') != ('name', '/CCITTFaxDecode'):
+        return None
+    if key('ImageMask')[1] == 'true':
+        return None
+    if key('SMask')[0] != 'null' or key('Mask')[0] != 'null':
+        return None
+    if key('Decode')[0] != 'null':
+        return None
+
+    parms_kind, parms = key('DecodeParms')
+    if parms_kind == 'xref':
+        try:
+            parms = doc.xref_object(int(parms.split()[0]), compressed=True)
+        except Exception:
+            return None
+    elif parms_kind != 'dict':
+        return None
+
+    k_match = re.search(r'/K\s+(-?\d+)', parms)
+    if not k_match or int(k_match.group(1)) != -1:
+        return None
+    if re.search(r'/(EncodedByteAlign|EndOfLine)\s+true', parms):
+        return None
+
+    columns = re.search(r'/Columns\s+(\d+)', parms)
+    if columns and int(columns.group(1)) != width:
+        return None
+    rows = re.search(r'/Rows\s+(\d+)', parms)
+    if rows and int(rows.group(1)) != height:
+        return None
+
+    photometric = 1 if re.search(r'/BlackIs1\s+true', parms) else 0
+
+    try:
+        ccitt_data = doc.xref_stream_raw(xref)
+    except Exception:
+        return None
+    if not ccitt_data:
+        return None
+
+    try:
+        tiff_data = _wrap_g4_stream_as_tiff(ccitt_data, width, height, photometric, dpi=dpi)
+        with Image.open(io.BytesIO(tiff_data)) as probe:
+            if probe.size != (width, height):
+                return None
+    except Exception:
+        return None
+    return tiff_data
+
+
+def _ccitt_tiff_matches_reference(doc, xref, tiff_data):
+    """抽样校验：将直封 TIFF 的解码结果与 MuPDF extract_image 的结果逐像素比对，防止极性/填充差异。"""
+    try:
+        reference = doc.extract_image(xref)
+        ref_bytes = (reference or {}).get('image')
+        if not ref_bytes:
+            return False
+        from PIL import ImageChops
+        with Image.open(io.BytesIO(ref_bytes)) as ref_im, Image.open(io.BytesIO(tiff_data)) as tif_im:
+            if ref_im.size != tif_im.size:
+                return False
+            diff = ImageChops.difference(ref_im.convert('L'), tif_im.convert('L'))
+            return diff.getbbox() is None
+    except Exception:
+        return False
+
+
 def _extract_raw_image_from_xobj(xobj):
     """直接从 XObject 提取未重压缩的原始图片数据流，保证 100% 原始画质与参数不变。"""
     if not isinstance(xobj, StreamObject):
@@ -566,7 +675,9 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
                 elif len(pages) >= max(2, int(total_pages * 0.4)) and total_pages >= 3:
                     duplicate_wm_obj_keys.add(ref_key)
 
-    writer = PdfWriter()
+    # 延迟到确认确实存在水印后再创建 PdfWriter：
+    # 无水印的 PDF（绝大多数扫描件与排版文档）无需为此逐页克隆页面对象。
+    writer = None
     total_watermarks_removed = 0
     pdf_was_modified = False
 
@@ -697,7 +808,7 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
 
         # --- 3. 清理内容流 (/Contents) 中的指令 ---
         contents = page.get('/Contents')
-        if contents:
+        if contents and _page_contents_may_contain_watermark(contents, wm_xobj_names, deep_analysis):
             try:
                 cs = ContentStream(contents, reader)
                 new_ops = []
@@ -766,13 +877,16 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
             pdf_was_modified = True
             total_watermarks_removed += page_wm_count
 
-        writer.add_page(page)
-
         if progress_callback:
             progress_callback(page_num, total_pages, f"正在检测并清除 PDF 水印：{page_num} / {total_pages} 页...")
 
     if not pdf_was_modified or total_watermarks_removed == 0:
         return pdf_path, 0, None
+
+    # 确认确有水印需要清除后，才把（已就地修改的）页面依序克隆进新的 PDF
+    writer = PdfWriter()
+    for page in reader.pages:
+        writer.add_page(page)
 
     # 保存净化后的 PDF
     temp_path = None
@@ -792,6 +906,42 @@ def clean_pdf_watermarks(pdf_path, output_pdf_path=None, progress_callback=None,
             except Exception:
                 pass
         return pdf_path, 0, None
+
+
+def _page_contents_may_contain_watermark(contents, wm_xobj_names, deep_analysis):
+    """
+    内容流极速预筛：完整分词解析一页内容流代价很高（每页数十毫秒），
+    而清除指令只有两种可能触发条件——/Artifact 结构标记块或已识别的水印 XObject 名称。
+    因此先对解码后的内容流做一次字节级子串扫描，命中才进入分词解析。
+    无法预读内容流时返回 True，保持原有行为。
+    """
+    needles = []
+    if not deep_analysis:
+        needles.append(b'Artifact')
+    for name in wm_xobj_names:
+        try:
+            needles.append(str(name).encode('latin1'))
+        except Exception:
+            return True
+    if not needles:
+        return False
+
+    try:
+        obj = contents.get_object() if hasattr(contents, 'get_object') else contents
+        if isinstance(obj, (list, tuple, ArrayObject)):
+            chunks = []
+            for item in obj:
+                item = item.get_object() if hasattr(item, 'get_object') else item
+                chunks.append(item.get_data())
+            stream_bytes = b'\n'.join(chunks)
+        else:
+            stream_bytes = obj.get_data()
+    except Exception:
+        return True
+
+    if not stream_bytes:
+        return False
+    return any(needle in stream_bytes for needle in needles)
 
 
 def _select_bottom_layer_image(page, img_keys):
@@ -918,101 +1068,77 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
             return 0, "PDF 中没有有效页面。"
 
         extracted_count = 0
-
-        # 深度处理专属高速流水线：针对复杂特殊或多图层 PDF（如包含 OCG 图层、JBIG2 蒙版、前景文字与背景分层等），
-        # 将整页的所有图层内容无缝复合渲染为用户在阅读器中浏览时的完整视图，并通过异步双工流水线实现渲染与编码写盘并行重叠。
-        if deep_analysis:
-            from concurrent.futures import ThreadPoolExecutor
-
-            def _async_save_jpeg(save_path, mode, width, height, raw_bytes):
-                try:
-                    from PIL import Image
-                    img = Image.frombytes(mode, (width, height), raw_bytes)
-                    img.save(save_path, format="JPEG", quality=80)
-                    return True
-                except Exception:
-                    return False
-
-            with ThreadPoolExecutor(max_workers=3) as save_pool:
-                pending_saves = []
-                cached_render_dpi = None
-
-                for p_idx, page in enumerate(doc):
-                    if cancel_event and cancel_event.is_set():
-                        for fut, _ in pending_saves:
-                            try:
-                                fut.result()
-                            except Exception:
-                                pass
-                        return extracted_count, "已取消提取。"
-
-                    page_num = p_idx + 1
-
-                    try:
-                        # 1. 极速 DPI 估算：直接利用 page.rect 和图片元组尺寸计算，完全消除耗时的 get_image_rects 内容流解析
-                        if cached_render_dpi is None:
-                            img_list = page.get_images()
-                            max_img_dpi = 300.0
-                            if page.rect.width > 0 and page.rect.height > 0:
-                                for item in img_list:
-                                    w = item[2] if len(item) > 2 else 0
-                                    h = item[3] if len(item) > 3 else 0
-                                    if w > 0 and h > 0:
-                                        max_img_dpi = max(max_img_dpi, (w / page.rect.width) * 72.0, (h / page.rect.height) * 72.0)
-                            cached_render_dpi = int(round(max(300.0, min(max_img_dpi, 600.0))))
-                            render_dpi = cached_render_dpi
-                        else:
-                            render_dpi = cached_render_dpi
-
-                        # 2. 直接按 RGB 色彩空间光栅化渲染，省去后置色彩空间转换与重新分配内存开销
-                        pix = page.get_pixmap(dpi=render_dpi, colorspace=fitz.csRGB, alpha=False)
-
-                        filename = f"page_{page_num:04d}.jpg"
-                        save_path = os.path.join(extract_dir, filename)
-                        mode = "RGB" if pix.n >= 3 else "L"
-
-                        # 3. 异步流水线保存：由后台线程池执行硬件加速 JPEG 压缩与磁盘写入，主线程零等待立即进入下一页渲染
-                        fut = save_pool.submit(_async_save_jpeg, save_path, mode, pix.width, pix.height, bytes(pix.samples))
-                        pending_saves.append((fut, save_path))
-
-                        # 内存保护：限制异步积压队列深度不超过 4，避免占用过多内存，自动等待最早任务完成
-                        if len(pending_saves) >= 4:
-                            old_fut, _ = pending_saves.pop(0)
-                            old_fut.result()
-
-                        extracted_count += 1
-                        if progress_callback:
-                            progress_callback(page_num, total_pages, f"正在进行深度处理整合多图层视图：{page_num} / {total_pages} 页...")
-
-                    except Exception:
-                        # 极端异常备用方案：尝试直接导出当前页
-                        try:
-                            pix = page.get_pixmap(dpi=300, alpha=False)
-                            save_path = os.path.join(extract_dir, f"page_{page_num:04d}.jpg")
-                            with open(save_path, "wb") as f:
-                                f.write(pix.tobytes("jpg", jpg_quality=80))
-                            extracted_count += 1
-                        except Exception:
-                            pass
-
-                # 等待所有异步写盘完成
-                for fut, _ in pending_saves:
-                    try:
-                        fut.result()
-                    except Exception:
-                        pass
-
-            if extracted_count == 0:
-                return 0, "该 PDF 中未检测到可提取的分页图片（可能为纯文本矢量排版或受保护）。"
-            return extracted_count, ""
-
-        # 常规模式：逐页快速提取底层原始图片流
+        # CCITT G4 直封快路径开关与「每文档仅校验一次」标记
+        ccitt_fast_path = True
+        ccitt_verified = False
         for p_idx, page in enumerate(doc):
             if cancel_event and cancel_event.is_set():
                 return extracted_count, "已取消提取。"
             page_num = p_idx + 1
 
             img_list = page.get_images()
+
+            # 深度处理模式：针对复杂特殊或多图层 PDF（如包含 OCG 图层、JBIG2 蒙版、前景文字与背景分层等），
+            # 将整页的所有图层内容无缝复合渲染为用户在阅读器中浏览时的完整视图，再输出供后续转换处理。
+            if deep_analysis:
+                try:
+                    # 计算页面内所有图片对象的原生最大 DPI，确保画质清晰且不模糊
+                    # 直接从 img_list 元组中读取 (xref, smask, width, height, ...) 的宽高，避免调用 doc.extract_image 导致重复流解压
+                    max_img_dpi = 300.0
+                    for item in img_list:
+                        try:
+                            xref = item[0]
+                            w = item[2] if len(item) > 2 else 0
+                            h = item[3] if len(item) > 3 else 0
+                            if w > 0 and h > 0:
+                                rects = page.get_image_rects(xref)
+                                if rects and rects[0].width > 0 and rects[0].height > 0:
+                                    dpi_x = (w / rects[0].width) * 72.0
+                                    dpi_y = (h / rects[0].height) * 72.0
+                                    max_img_dpi = max(max_img_dpi, dpi_x, dpi_y)
+                                elif page.rect.width > 0 and page.rect.height > 0:
+                                    dpi_w = (w / page.rect.width) * 72.0
+                                    dpi_h = (h / page.rect.height) * 72.0
+                                    max_img_dpi = max(max_img_dpi, dpi_w, dpi_h)
+                        except Exception:
+                            pass
+
+                    render_dpi = int(round(max(300.0, min(max_img_dpi, 600.0))))
+                    # 整页多图层复合渲染为单一 Pixmap 浏览视图（alpha=False 使用白色背景混合合成所有图层、蒙版与矢量内容）
+                    pix = page.get_pixmap(dpi=render_dpi, alpha=False)
+                    if pix.n - pix.alpha > 3:
+                        pix = fitz.Pixmap(fitz.csRGB, pix)
+
+                    filename = f"page_{page_num:04d}.jpg"
+                    save_path = os.path.join(extract_dir, filename)
+
+                    # 优先使用 PIL 快速保存为高质量 JPEG（质量 80，利用 libjpeg-turbo 硬件加速，提升保存速度并大幅降低体积）
+                    saved_jpg = False
+                    try:
+                        mode = "RGB" if pix.n >= 3 else "L"
+                        img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+                        img.save(save_path, format="JPEG", quality=80)
+                        saved_jpg = True
+                    except Exception:
+                        pass
+
+                    if not saved_jpg:
+                        try:
+                            data = pix.tobytes("jpg", jpg_quality=80)
+                        except Exception:
+                            data = pix.tobytes("jpg")
+                        with open(save_path, "wb") as f:
+                            f.write(data)
+
+                    extracted_count += 1
+
+                    if progress_callback:
+                        progress_callback(page_num, total_pages, f"正在进行深度处理整合多图层视图：{page_num} / {total_pages} 页...")
+                    continue
+                except Exception:
+                    # 若复合渲染异常则平滑回退至单图层提取逻辑
+                    pass
+
             if not img_list:
                 continue
 
@@ -1062,6 +1188,44 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                 ext = None
 
                 if not deep_analysis:
+                    # 极速无损路径：页面无旋转时，CCITT G4 二值图直接复用原生压缩流封装为 TIFF，
+                    # 完全跳过 MuPDF 的「解码 + 重新编码 PNG」（单页可省数十毫秒，文件体积亦更小）。
+                    if ccitt_fast_path and page.rotation == 0:
+                        bottom_size = next(
+                            ((it[2], it[3]) for it in img_list if it[0] == bottom_xref and len(it) > 3),
+                            (0, 0),
+                        )
+                        # 由「图像像素尺寸 / 页面尺寸」推算原始解析度，使重新打包的 PDF 保持原始页面尺寸
+                        page_dpi = None
+                        try:
+                            rect = page.rect
+                            if bottom_size[0] > 0 and bottom_size[1] > 0 and rect.width > 0 and rect.height > 0:
+                                dpi_x = bottom_size[0] * 72.0 / rect.width
+                                dpi_y = bottom_size[1] * 72.0 / rect.height
+                                if 20.0 <= dpi_x <= 4800.0 and 20.0 <= dpi_y <= 4800.0:
+                                    page_dpi = (round(dpi_x, 2), round(dpi_y, 2))
+                        except Exception:
+                            page_dpi = None
+                        ccitt_tiff = _ccitt_g4_tiff_from_xref(
+                            doc, bottom_xref, int(bottom_size[0] or 0), int(bottom_size[1] or 0),
+                            dpi=page_dpi,
+                        )
+                        if ccitt_tiff is not None:
+                            if not ccitt_verified:
+                                # 每个文档只抽样校验一次，确保极性、行列对齐与常规提取完全一致
+                                ccitt_verified = True
+                                if not _ccitt_tiff_matches_reference(doc, bottom_xref, ccitt_tiff):
+                                    ccitt_fast_path = False
+                                    ccitt_tiff = None
+                            if ccitt_tiff is not None:
+                                data = ccitt_tiff
+                                ext = ".tif"
+
+                need_pixmap = False
+                if data is None and deep_analysis:
+                    # 深度分析模式：针对复杂特殊 PDF 默认调用 PyMuPDF Pixmap 渲染处理
+                    need_pixmap = True
+                elif data is None:
                     img_info = doc.extract_image(bottom_xref)
                     raw_ext = (img_info.get("ext") or "").lower() if img_info else ""
 
@@ -1088,9 +1252,6 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                             need_pixmap = True
                         elif ext == ".png" and not data.startswith(b'\x89PNG'):
                             need_pixmap = True
-                else:
-                    # 深度分析模式：针对复杂特殊 PDF 默认调用 PyMuPDF Pixmap 渲染处理
-                    need_pixmap = True
 
                 if need_pixmap:
                     try:
@@ -1811,6 +1972,36 @@ WOLF_PRESET_NAMES = {
 }
 
 
+def _box_sum_edge(np, arr, radius):
+    """
+    对二维数组做 (2r+1)×(2r+1) 窗口求和（窗口越界处按边缘像素复制），返回与输入同尺寸的窗口和。
+
+    实现要点（相比逐行 np.pad + 转置写法）：
+    - 手工分配带前缀和余量的缓冲区并直接切片写入，省去 np.pad 的整图拷贝与 dtype 检查开销；
+    - 纵向前缀和直接沿 axis=0 累加（逐行顺序访问），避免先转置视图再 np.pad 的非连续随机读取。
+    """
+    n = 2 * radius + 1
+    h, w = arr.shape
+
+    # 横向：左/右各复制 radius 个边缘列，并在末尾多留 1 列作为前缀和差分的余量
+    padded = np.empty((h, w + n), dtype=arr.dtype)
+    padded[:, :radius + 1] = arr[:, :1]
+    padded[:, radius + 1:radius + 1 + w] = arr
+    padded[:, radius + 1 + w:] = arr[:, -1:]
+    np.cumsum(padded, axis=1, out=padded)
+    row_sums = np.subtract(padded[:, n:], padded[:, :-n])
+    del padded
+
+    # 纵向：上/下各复制 radius 个边缘行，末尾多留 1 行，沿 axis=0 顺序累加
+    padded = np.empty((h + n, w), dtype=arr.dtype)
+    padded[:radius + 1, :] = row_sums[:1, :]
+    padded[radius + 1:radius + 1 + h, :] = row_sums
+    padded[radius + 1 + h:, :] = row_sums[-1:, :]
+    del row_sums
+    np.cumsum(padded, axis=0, out=padded)
+    return np.subtract(padded[n:, :], padded[:-n, :])
+
+
 def wolf_binarize(gray_img, window=51, k=0.30):
     """
     使用 Wolf 局部自适应算法对灰度图进行二值化处理，返回模式为 '1' 的 PIL Image。
@@ -1847,26 +2038,22 @@ def wolf_binarize(gray_img, window=51, k=0.30):
         if win % 2 == 0:
             win += 1
         r = win // 2
-
-        def _moving_sum_1d(arr, radius):
-            pad_w = ((0, 0), (radius + 1, radius))
-            padded = np.pad(arr, pad_w, mode='edge')
-            cs = np.cumsum(padded, axis=1)
-            return cs[:, 2 * radius + 1:] - cs[:, :-2 * radius - 1]
+        win_area = float((2 * r + 1) * (2 * r + 1))
 
         # 1. 局部均值 m
-        s1 = _moving_sum_1d(im_arr, r)
-        s2 = _moving_sum_1d(s1.T, r).T
-        win_area = float((2 * r + 1) * (2 * r + 1))
-        m = s2 / win_area
+        s2 = _box_sum_edge(np, im_arr, r)
+        m = s2
+        m /= win_area
 
-        # 2. 局部标准差 s
-        arr_sq = im_arr * im_arr
-        sq1 = _moving_sum_1d(arr_sq, r)
-        sq2 = _moving_sum_1d(sq1.T, r).T
-        mean_sq = sq2 / win_area
-        var = np.maximum(0.0, mean_sq - m * m)
-        s = np.sqrt(var)
+        # 2. 局部标准差 s（复用平方和缓冲，减少整图级中间数组）
+        sq = im_arr * im_arr
+        mean_sq = _box_sum_edge(np, sq, r)
+        del sq
+        mean_sq /= win_area
+        mean_sq -= m * m
+        np.maximum(mean_sq, 0.0, out=mean_sq)
+        s = np.sqrt(mean_sq, out=mean_sq)
+        del mean_sq
 
         # 3. 全局最小值 M 与最大标准差 R
         min_I = float(np.min(im_arr))
@@ -1875,7 +2062,12 @@ def wolf_binarize(gray_img, window=51, k=0.30):
 
         # 4. Wolf 阈值计算
         k_val = float(k)
-        thresh = m - k_val * (1.0 - s / R) * (m - min_I)
+        thresh = s
+        thresh /= -R
+        thresh += 1.0
+        thresh *= (m - min_I)
+        thresh *= -k_val
+        thresh += m
 
         # 5. 生成 1 位二值图（像素 > 阈值为白/1，<= 阈值为黑/0）
         bin_mask = (im_arr > thresh)
@@ -1974,11 +2166,21 @@ def get_jp2_save_options(source_img, src_path):
 
 
 def save_image_atomically(pil_img, output_path, image_format, write_lock=None, **save_options):
-    """写入同目录临时文件，成功后再替换，避免异常时出现残缺图片。"""
-    temporary_path = f"{output_path}.{threading.get_ident()}.part"
+    """
+    写入同目录临时文件，成功后再替换，避免异常时出现残缺图片。
+
+    编码（G4/JPEG/JP2 压缩，CPU 密集）先在锁外写入内存缓冲区，可由多个线程并行；
+    write_lock 只保护落盘与替换这一小段 IO，避免把整个编码过程串行化。
+    """
+    buffer = io.BytesIO()
+    pil_img.save(buffer, format=image_format, **save_options)
+    data = buffer.getbuffer()
+
+    temporary_path = f"{output_path}.{os.getpid()}-{threading.get_ident()}.part"
     def _do_save():
         try:
-            pil_img.save(temporary_path, format=image_format, **save_options)
+            with open(temporary_path, 'wb') as fp:
+                fp.write(data)
             os.replace(temporary_path, output_path)
         finally:
             if os.path.exists(temporary_path):
@@ -1996,7 +2198,7 @@ def save_image_atomically(pil_img, output_path, image_format, write_lock=None, *
 
 def copy_file_atomically(source_path, output_path, write_lock=None):
     """复制不需重新编码的原图，同样不暴露未完成的目标文件。"""
-    temporary_path = f"{output_path}.{threading.get_ident()}.part"
+    temporary_path = f"{output_path}.{os.getpid()}-{threading.get_ident()}.part"
     def _do_copy():
         try:
             shutil.copy2(source_path, temporary_path)
@@ -2544,12 +2746,9 @@ def completion_text(summary, pdf_count=None, pdf_error=None, keep_images=False, 
     return '\n'.join(lines)
 
 
-def build_task_report(summary, target_dir, save_report=True, **kwargs):
-    """生成任务报告文本并在目标目录输出 task_report.txt 文件（若 save_report=False 或 target_dir 为空则不写文件）。"""
-    if save_report and target_dir and os.path.isdir(target_dir):
-        report_file = os.path.join(target_dir, "task_report.txt")
-    else:
-        report_file = None
+def build_task_report(summary, target_dir, **kwargs):
+    """生成任务报告文本并在目标目录输出 task_report.txt 文件。"""
+    report_file = os.path.join(target_dir, "task_report.txt") if (target_dir and os.path.isdir(target_dir)) else None
     summary['report_file'] = report_file
     report_text = completion_text(summary, **kwargs)
     if report_file:
@@ -2623,10 +2822,19 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
         if is_bilevel:
             # 1 位黑白二值图：必须严格使用 1 位 TIFF Group 4 (Filter /CCITTFaxDecode) 封装
             if im.mode != '1':
-                im = im.convert('1')
+                # 8 位灰度但已是纯黑白二值：用 256 项查找表直转 1 位，避免 Image.convert('1')
+                # 的抖动运算（4MP 页面约 100ms → 约 10ms），结果与二值数据完全一致。
+                if im.mode == 'L':
+                    im = im.point(_BILEVEL_L_TO_ONE_LUT, '1')
+                else:
+                    im = im.convert('1')
             is_single_strip_g4 = False
-            # 仅当已是单 Strip、Group 4 且 PhotometricInterpretation == 1 (BlackIsZero) 时，可安全复用底层流
-            if im.format == 'TIFF' and getattr(im, 'tag_v2', {}).get(259) == 4 and getattr(im, 'tag_v2', {}).get(262, 1) == 1:
+            # 仅当已是单 Strip、Group 4 的 TIFF 时，可安全复用底层压缩流（无需解码重编码）。
+            # Tag 262 = 1 (BlackIsZero) 对应 PDF 的 /BlackIs1 true；262 = 0 (WhiteIsZero) 对应 false，
+            # 按源 TIFF 的极性写入 /BlackIs1 即可保证渲染结果与重新编码完全一致。
+            black_is1 = True
+            if im.format == 'TIFF' and getattr(im, 'tag_v2', {}).get(259) == 4:
+                photometric = getattr(im, 'tag_v2', {}).get(262, 1)
                 offsets = im.tag_v2.get(273)
                 counts = im.tag_v2.get(279)
                 if offsets is not None and not isinstance(offsets, (list, tuple)):
@@ -2635,11 +2843,13 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
                     counts = [counts]
                 if offsets and counts and len(offsets) == 1:
                     is_single_strip_g4 = True
+                    black_is1 = photometric != 0
                     with open(image_path, 'rb') as f:
                         f.seek(int(offsets[0]))
                         ccitt_data = f.read(int(counts[0]))
 
             if not is_single_strip_g4:
+                black_is1 = True
                 bio = io.BytesIO()
                 tiffinfo = TiffImagePlugin.ImageFileDirectory_v2()
                 tiffinfo[278] = h  # 强制单 Strip（RowsPerStrip = 高度），确保整页流完整不被截断
@@ -2668,7 +2878,7 @@ def add_image_page_to_pdf_writer(writer, image_path, default_res=300.0):
                     NameObject('/K'): NumberObject(-1),
                     NameObject('/Columns'): NumberObject(w),
                     NameObject('/Rows'): NumberObject(h),
-                    NameObject('/BlackIs1'): BooleanObject(True),
+                    NameObject('/BlackIs1'): BooleanObject(black_is1),
                     NameObject('/EndOfBlock'): BooleanObject(False),
                 }),
             })
@@ -3048,18 +3258,37 @@ def set_pdf_open_to_fit_page(pdf_path):
         raise
 
 
-def clean_cancelled_output(target_dir, lang='zh-CN'):
+def clean_cancelled_output(target_dir, lang='zh-CN', preserve_names=None):
+    """
+    取消任务后清理输出。
+
+    preserve_names 为 None 时目录由本次任务独占创建，整体删除；
+    否则为任务开始前目录中已有的条目名集合，只删除本次新增的条目并保留目录本身。
+    """
     lang = lang if lang in ('zh-CN', 'zh-TW', 'ja', 'en') else 'zh-CN'
     T = {
-        'zh-CN': ("任务已取消，输出目录已被成功删除。\n({target_dir})", "任务已取消，但删除目录失败，请手动清理。\n原因: {error}"),
-        'zh-TW': ("任務已取消，輸出目錄已被成功刪除。\n({target_dir})", "任務已取消，但刪除目錄失敗，請手動清理。\n原因: {error}"),
-        'ja': ("タスクがキャンセルされ、出力フォルダが正常に削除されました。\n({target_dir})", "タスクがキャンセルされましたが、フォルダの削除に失敗しました。手動で削除してください。\n原因: {error}"),
-        'en': ("Task cancelled. Output directory was successfully removed。\n({target_dir})", "Task cancelled, but failed to delete directory. Please clean it manually.\nReason: {error}"),
+        'zh-CN': ("任务已取消，输出目录已被成功删除。\n({target_dir})", "任务已取消，但删除目录失败，请手动清理。\n原因: {error}", "任务已取消，已清理本次生成的文件，原有文件均已保留。\n({target_dir})"),
+        'zh-TW': ("任務已取消，輸出目錄已被成功刪除。\n({target_dir})", "任務已取消，但刪除目錄失敗，請手動清理。\n原因: {error}", "任務已取消，已清理本次產生的檔案，原有檔案均已保留。\n({target_dir})"),
+        'ja': ("タスクがキャンセルされ、出力フォルダが正常に削除されました。\n({target_dir})", "タスクがキャンセルされましたが、フォルダの削除に失敗しました。手動で削除してください。\n原因: {error}", "タスクがキャンセルされました。今回生成されたファイルを削除し、既存のファイルは保持しました。\n({target_dir})"),
+        'en': ("Task cancelled. Output directory was successfully removed.\n({target_dir})", "Task cancelled, but failed to delete directory. Please clean it manually.\nReason: {error}", "Task cancelled. Files created by this task were removed; existing files were kept.\n({target_dir})"),
     }
     try:
-        if os.path.exists(target_dir):
-            shutil.rmtree(target_dir)
-        return T[lang][0].format(target_dir=target_dir)
+        if preserve_names is None:
+            if os.path.exists(target_dir):
+                shutil.rmtree(target_dir)
+            return T[lang][0].format(target_dir=target_dir)
+
+        preserve = set(preserve_names)
+        if os.path.isdir(target_dir):
+            for name in os.listdir(target_dir):
+                if name in preserve:
+                    continue
+                path = os.path.join(target_dir, name)
+                if os.path.isdir(path) and not os.path.islink(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
+        return T[lang][2].format(target_dir=target_dir)
     except Exception as e:
         return T[lang][1].format(error=str(e))
 

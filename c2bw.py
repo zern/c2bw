@@ -13,15 +13,11 @@ c2bw/
 本文件作为桌面版打包与向下兼容顶层入口，直接委托调用 c2bw.desktop.main()。
 """
 
-import sys
-import os
 import multiprocessing
 
 if __name__ == '__main__':
     multiprocessing.freeze_support()
 
-    from c2bw.core import *
-    from c2bw.service import *
-    from c2bw.desktop import *
+    from c2bw.desktop import main
     main()
 

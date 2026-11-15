@@ -68,11 +68,13 @@ def build_nuitka():
     import clr_loader
     import pymupdf
     import fitz
+    import webview
 
     pynet_dir = os.path.dirname(pythonnet.__file__)
     clr_dir = os.path.dirname(clr_loader.__file__)
     mupdf_dir = os.path.dirname(pymupdf.__file__)
     fitz_dir = os.path.dirname(fitz.__file__)
+    webview_dir = os.path.dirname(webview.__file__)
 
     py3_dll = os.path.join(sys.prefix, 'python3.dll')
     if not os.path.exists(py3_dll):
@@ -123,14 +125,15 @@ def build_nuitka():
         "--include-data-file=hanji.ico=hanji.ico",
         f"--include-data-dir={os.path.join(pynet_dir, 'runtime')}=pythonnet/runtime",
         f"--include-data-dir={os.path.join(clr_dir, 'ffi', 'dlls')}=clr_loader/ffi/dlls",
+        f"--include-data-dir={os.path.join(webview_dir, 'lib')}=webview/lib",
         f"--include-data-files={os.path.join(mupdf_dir, '*.*')}=pymupdf/",
         f"--include-data-files={os.path.join(fitz_dir, '*.*')}=fitz/",
         f"--include-data-file={py3_dll}=python3.dll",
         f"--include-data-file={py3_dll}=pymupdf/python3.dll",
         "--nofollow-import-to=fitz",
         "--nofollow-import-to=pymupdf",
+        "--nofollow-import-to=tkinter",
         "--no-deployment-flag=excluded-module-usage",
-        "--enable-plugin=tk-inter",
         "--nofollow-import-to=jinja2",
         "--nofollow-import-to=markupsafe",
         "--nofollow-import-to=mako",

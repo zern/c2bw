@@ -9,7 +9,10 @@ import shutil
 import json
 import queue
 import threading
+import time
+import collections
 import concurrent.futures
+from concurrent.futures.process import BrokenProcessPool
 import urllib.request
 import webbrowser
 
@@ -51,6 +54,15 @@ QUIT_CONFIRMATIONS = {
 UPDATE_INFO_URL = 'https://tools.hanjihebi.com/aisoft/c2bw_update.json'
 CURRENT_VERSION = '4.2.0.0'
 CURRENT_VERSION_NAME = '4.2'
+
+# 图像批处理进度事件的最小上报间隔（秒）。界面按 50~250ms 轮询，
+# 逐张上报在高速批量处理时只会堆积事件并拖慢收尾，故此处限流。
+PROGRESS_EMIT_INTERVAL = 0.04
+
+# 图片数少于此值时用线程池：进程启动与导入依赖约需数百毫秒，小批量不划算。
+MULTIPROCESS_MIN_TASKS = 4
+# Windows 下 ProcessPoolExecutor 的 max_workers 上限为 61。
+MAX_PROCESS_WORKERS = 61
 
 
 def parse_version_tuple(ver_str):
@@ -148,6 +160,20 @@ def save_user_language(lang):
         cfg['language'] = lang
         return save_user_config(cfg)
     return False
+
+
+def _unique_task_dir(base_dir, name):
+    """返回 base_dir 下不存在或为空的目录路径；被占用时依次尝试 "name (2)"、"name (3)"……"""
+    candidate = os.path.join(base_dir, name)
+    index = 2
+    while os.path.lexists(candidate) and not (
+        os.path.isdir(candidate)
+        and not os.path.islink(candidate)
+        and not os.listdir(candidate)
+    ):
+        candidate = os.path.join(base_dir, f"{name} ({index})")
+        index += 1
+    return candidate
 
 
 class ImageProcessorService:
@@ -355,16 +381,13 @@ class ImageProcessorService:
 
             pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
             suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode, invert_binarize=invert_binarize)
+            # 任务目录在取消/完成清理时会被整体删除或清空，必须保证是本次任务独占的新目录，
+            # 否则同名的历史结果会被误删。已存在且非空时自动追加序号。
+            task_dir = _unique_task_dir(base_dir, f"{pdf_name}{suffix}")
             if no_convert_pdf:
-                task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
                 final_pdf_path = ''
             else:
-                out_stem = f"{pdf_name}{suffix}"
-                candidate_pdf = os.path.abspath(os.path.join(base_dir, f"{out_stem}.pdf"))
-                if os.path.normcase(candidate_pdf) == os.path.normcase(os.path.abspath(pdf_path)):
-                    candidate_pdf = os.path.abspath(os.path.join(base_dir, f"{pdf_name}_已去水印.pdf"))
-                final_pdf_path = candidate_pdf
-                task_dir = os.path.join(base_dir, f"._c2bw_tmp_{pdf_name}{suffix}")
+                final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
 
             settings = {
                 'work_mode': 'pdf',
@@ -519,46 +542,60 @@ class ImageProcessorService:
             self.cancel_event.clear()
             self.pause_event.set()
 
+        # 记录提取前目录中已有的条目：用户可能确认向非空目录提取，取消时只能删除本次新增的内容。
+        if os.path.isdir(extract_dir):
+            try:
+                preexisting_names = set(os.listdir(extract_dir))
+            except OSError:
+                preexisting_names = set()
+        else:
+            preexisting_names = None
+
         def _do_extract():
             def _progress(cur, total, msg):
                 self.ui_events.put(('progress', (cur / total) * 100, msg))
 
-            lang = get_system_language()
-            self.ui_events.put(('status', get_backend_text('status_checking_watermarks', lang)))
-            cleaned_pdf_path, wm_count, wm_temp_path = clean_pdf_watermarks(
-                pdf_path, progress_callback=_progress, cancel_event=self.cancel_event, deep_analysis=deep_analysis
-            )
-            if self.cancel_event.is_set():
-                if wm_temp_path and os.path.exists(wm_temp_path):
-                    try:
-                        os.remove(wm_temp_path)
-                    except Exception:
-                        pass
-                with self.state_lock:
-                    self.is_processing = False
-                    self.phase = 'idle'
-                self.ui_events.put(('finish', self._clean_cancelled_output(extract_dir, lang=lang)))
-                return
-
-            if wm_count > 0:
-                self.ui_events.put(('status', get_backend_text('status_watermarks_cleaned', lang, count=wm_count)))
-
-            self.ui_events.put(('status', get_backend_text('status_extracting_pdf', lang)))
+            wm_temp_path = None
             try:
+                lang = self.current_language or get_system_language()
+                self.ui_events.put(('status', get_backend_text('status_checking_watermarks', lang)))
+                cleaned_pdf_path, wm_count, wm_temp_path = clean_pdf_watermarks(
+                    pdf_path, progress_callback=_progress, cancel_event=self.cancel_event, deep_analysis=deep_analysis
+                )
+                if self.cancel_event.is_set():
+                    with self.state_lock:
+                        self.is_processing = False
+                        self.phase = 'idle'
+                        self.active_target_dir = None
+                    self.ui_events.put(('finish', clean_cancelled_output(
+                        extract_dir, lang=lang, preserve_names=preexisting_names,
+                    )))
+                    return
+
+                if wm_count > 0:
+                    self.ui_events.put(('status', get_backend_text('status_watermarks_cleaned', lang, count=wm_count)))
+
+                self.ui_events.put(('status', get_backend_text('status_extracting_pdf', lang)))
                 count, err = extract_images_from_pdf(
                     cleaned_pdf_path, extract_dir, progress_callback=_progress, cancel_event=self.cancel_event, deep_analysis=deep_analysis
                 )
+                with self.state_lock:
+                    self.is_processing = False
+                    self.phase = 'idle'
+                    self.active_target_dir = None
+                self.ui_events.put(('pdf_extracted', pdf_path, extract_dir, count, err))
+            except Exception as e:
+                with self.state_lock:
+                    self.is_processing = False
+                    self.phase = 'idle'
+                    self.active_target_dir = None
+                self.ui_events.put(('pdf_extracted', pdf_path, extract_dir, 0, str(e)))
             finally:
                 if wm_temp_path and os.path.exists(wm_temp_path):
                     try:
                         os.remove(wm_temp_path)
-                    except Exception:
+                    except OSError:
                         pass
-
-            with self.state_lock:
-                self.is_processing = False
-                self.phase = 'idle'
-            self.ui_events.put(('pdf_extracted', pdf_path, extract_dir, count, err))
 
         threading.Thread(target=_do_extract, daemon=True).start()
         return {'ok': True, 'pdf_path': pdf_path, 'extract_dir': extract_dir}
@@ -580,24 +617,29 @@ class ImageProcessorService:
             return {'ok': True, 'paused': self.is_paused, 'message': message}
 
     def cancel_processing(self):
+        pending_target_dir = None
+        lang = None
         with self.state_lock:
             if not self.is_processing:
                 return {'ok': False, 'error': '当前没有正在运行的任务。'}
             self.cancel_event.set()
             self.pause_event.set()
             self.is_paused = False
+            lang = self.current_language or get_system_language()
 
             # 图片任务已完成、正在等待是否合并 PDF 时，没有后台线程负责清理。
             if self.pending_pdf is not None:
                 settings, _ = self.pending_pdf
                 self.pending_pdf = None
-                self.phase = 'cancelling'
-                self.ui_events.put((
-                    'finish',
-                    clean_cancelled_output(settings['target_dir']),
-                ))
-            else:
-                self.phase = 'cancelling'
+                pending_target_dir = settings['target_dir']
+                lang = settings.get('lang') or lang
+            self.phase = 'cancelling'
+
+        if pending_target_dir is not None:
+            self.ui_events.put((
+                'finish',
+                clean_cancelled_output(pending_target_dir, lang=lang),
+            ))
         return {'ok': True, 'message': '正在中止任务并清理输出目录...'}
 
     def respond_pdf_prompt(self, generate_pdf):
@@ -639,13 +681,16 @@ class ImageProcessorService:
                     'percent': event[1],
                     'message': event[2],
                 })
+            elif event_type == 'phase':
+                with self.state_lock:
+                    if self.phase != 'cancelling' or event[1] == 'idle':
+                        self.phase = event[1]
             elif event_type == 'status':
-                if 'PDF' in event[1]:
-                    self.phase = 'pdf'
                 frontend_events.append({'type': 'status', 'message': event[1]})
             elif event_type == 'ask_pdf':
-                self.pending_pdf = (event[1], event[2])
-                self.phase = 'awaiting_pdf'
+                with self.state_lock:
+                    self.pending_pdf = (event[1], event[2])
+                    self.phase = 'awaiting_pdf'
                 frontend_events.append({
                     'type': 'ask_pdf',
                     'include_subfolders': event[1]['include_subfolders'],
@@ -665,22 +710,28 @@ class ImageProcessorService:
                     self.phase = 'idle'
                     self.active_target_dir = None
                     self.pending_pdf = None
+                    last_out = self.last_output_dir
                 frontend_events.append({
                     'type': 'finish',
                     'message': event[1],
                     'can_open_output': bool(
-                        self.last_output_dir
-                        and os.path.isdir(self.last_output_dir)
+                        last_out
+                        and os.path.isdir(last_out)
                         and not self.cancel_event.is_set()
                     ),
                 })
 
+        with self.state_lock:
+            processing = self.is_processing
+            paused = self.is_paused
+            phase = self.phase
+
         return {
             'ok': True,
             'events': frontend_events,
-            'processing': self.is_processing,
-            'paused': self.is_paused,
-            'phase': self.phase,
+            'processing': processing,
+            'paused': paused,
+            'phase': phase,
         }
 
     def open_output_folder(self):
@@ -733,8 +784,9 @@ class ImageProcessorService:
         saved = get_saved_language()
         sys_lang = get_system_language()
         effective = saved if saved else sys_lang
-        self.current_language = effective
-        self._sync_window_localization(effective)
+        if self.current_language != effective:
+            self.current_language = effective
+            self._sync_window_localization(effective)
         return {
             'ok': True,
             'language': effective,
@@ -764,6 +816,162 @@ class ImageProcessorService:
             cancel_event=self.cancel_event,
             write_lock=self.output_write_lock,
         )
+
+    def _should_use_processes(self, settings, task_count, workers):
+        """
+        图像编码/二值化在 Pillow 中持有 GIL，多线程无法并行，CPU 密集任务改用多进程。
+        纯复制原图（不二值化、不裁切、不缩放）以 IO 为主，仍用线程以免进程启动开销。
+        """
+        if os.environ.get('C2BW_DISABLE_MULTIPROCESS'):
+            return False
+        if workers < 2 or task_count < MULTIPROCESS_MIN_TASKS:
+            return False
+        size_opt_mode = settings.get('size_opt_mode') or settings.get('non_bin_format', 'original')
+        cpu_light = (
+            not settings.get('enable_binarize')
+            and not settings.get('enable_crop')
+            and size_opt_mode in ('original', 'keep')
+        )
+        return not cpu_light
+
+    def _create_image_executor(self, settings, task_count):
+        """返回 (executor, 提交函数, 是否进程池, 并发数)。进程池创建失败时回退线程池。"""
+        requested = max(1, int(settings.get('max_threads', 8)))
+        if self._should_use_processes(settings, task_count, requested):
+            workers = max(1, min(requested, os.cpu_count() or 1, MAX_PROCESS_WORKERS, task_count))
+            if workers >= 2:
+                try:
+                    executor = concurrent.futures.ProcessPoolExecutor(max_workers=workers)
+                    # 进程内无法共享暂停/取消事件与线程锁：由父进程控制派发节奏，
+                    # 各进程只写各自独占的输出文件，无需写锁。
+                    return executor, process_single_image, True, workers
+                except Exception:
+                    pass
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=requested)
+        return executor, self.process_single_image, False, requested
+
+    def _run_image_batch(self, tasks, settings):
+        """
+        并行处理一批图片并汇总结果，同时负责进度上报、暂停与取消。
+
+        采用有界派发：同时在途的任务数不超过并发数的两倍。暂停时停止派发新任务
+        （在途任务完成当前图片后即停），取消时不再派发并等待在途任务结束。
+        进程池异常崩溃（BrokenProcessPool）时把未完成任务转交线程池继续处理。
+        """
+        total_files = len(tasks)
+        stats = {
+            'processed': 0,
+            'succeeded': 0,
+            'errors': [],
+            'total_output_images': 0,
+            'excluded_single_count': 0,
+            'cropped_double_count': 0,
+            'used_processes': False,
+        }
+        if total_files == 0:
+            return stats
+
+        pending = collections.deque(tasks)
+        last_progress_emit = 0.0
+        executor, worker, is_process, workers = self._create_image_executor(settings, total_files)
+        stats['used_processes'] = is_process
+        in_flight = {}
+
+        def _max_in_flight():
+            # 线程模式下工作函数自身会在暂停时阻塞，可多排队；进程模式只多预取 1 个，
+            # 让暂停后最多再处理 workers+1 张即停下。
+            return workers + 1 if is_process else max(2, workers * 2)
+
+        def _record(task, result):
+            nonlocal last_progress_emit
+            stats['processed'] += 1
+            if result['ok']:
+                stats['succeeded'] += 1
+                stats['total_output_images'] += result.get('output_count', 1)
+                if result.get('is_excluded_single'):
+                    stats['excluded_single_count'] += 1
+                elif not result.get('is_single'):
+                    stats['cropped_double_count'] += 1
+            elif not self.cancel_event.is_set():
+                stats['errors'].append(f"{task[1]}：{result['error'] or result['message']}")
+            # 进度事件限流：小图极速批量处理时，逐张上报会堆积大量消息拖慢界面响应
+            now = time.monotonic()
+            if now - last_progress_emit >= PROGRESS_EMIT_INTERVAL or stats['processed'] == total_files:
+                last_progress_emit = now
+                self.ui_events.put((
+                    'progress',
+                    (stats['processed'] / total_files) * 100,
+                    result['message'],
+                ))
+
+        def _fallback_to_threads():
+            nonlocal executor, worker, is_process, workers
+            # 进程池已损坏：已正常完成的在途任务照常记录，其余重新排队交给线程池处理
+            requeue = []
+            for future, task in list(in_flight.items()):
+                if future.done() and not future.cancelled() and future.exception() is None:
+                    _record(task, future.result())
+                else:
+                    requeue.append(task)
+            for task in reversed(requeue):
+                pending.appendleft(task)
+            in_flight.clear()
+            executor.shutdown(wait=False)
+            workers = max(1, int(settings.get('max_threads', 8)))
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
+            worker = self.process_single_image
+            is_process = False
+            stats['used_processes'] = False
+
+        try:
+            while True:
+                cancelled = self.cancel_event.is_set()
+                while (
+                    pending
+                    and not cancelled
+                    and self.pause_event.is_set()
+                    and len(in_flight) < _max_in_flight()
+                ):
+                    task = pending.popleft()
+                    try:
+                        future = executor.submit(worker, task[0], task[1], task[2], task[3], settings)
+                    except BrokenProcessPool:
+                        pending.appendleft(task)
+                        _fallback_to_threads()
+                        continue
+                    in_flight[future] = task
+
+                if not in_flight:
+                    if not pending or cancelled:
+                        break
+                    # 已暂停且在途任务全部完成：等待恢复或取消（取消时会同时置位 pause_event）
+                    self.pause_event.wait(0.2)
+                    continue
+
+                done, _ = concurrent.futures.wait(
+                    in_flight, timeout=0.2, return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                broken = False
+                for future in done:
+                    task = in_flight[future]
+                    try:
+                        result = future.result()
+                    except BrokenProcessPool:
+                        broken = True
+                        continue
+                    except Exception as e:
+                        result = make_result(
+                            False, f"错误 {task[2]}: {str(e)}", str(e),
+                            is_single=False, is_excluded_single=False, output_count=0,
+                        )
+                    del in_flight[future]
+                    _record(task, result)
+                if broken:
+                    _fallback_to_threads()
+        finally:
+            executor.shutdown(wait=True)
+
+        return stats
 
     def _assign_output_stems(self, tasks):
         return assign_output_stems(tasks)
@@ -820,6 +1028,7 @@ class ImageProcessorService:
         pdf_total = sum(len(paths) for _, paths in groups)
         pdf_done = 0
         lang = settings.get('lang') or get_system_language()
+        self.ui_events.put(('phase', 'pdf'))
         self.ui_events.put(('status', get_backend_text('status_packing_pdf', lang)))
         for output_dir, image_paths in groups:
             image_paths.sort(
@@ -973,6 +1182,7 @@ class ImageProcessorService:
         pdf_done = 0
         generated_pdfs = []
         lang = settings.get('lang') or get_system_language()
+        self.ui_events.put(('phase', 'pdf'))
         self.ui_events.put(('status', get_backend_text('status_direct_pdf', lang)))
 
         for dir_path, image_paths, pdf_path in group_targets:
@@ -1076,43 +1286,13 @@ class ImageProcessorService:
             return
 
         tasks, collision_groups = self._assign_output_stems(tasks)
-        processed = 0
-        succeeded = 0
-        errors = []
-        total_output_images = 0
-        excluded_single_count = 0
-        cropped_double_count = 0
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=settings['max_threads']) as executor:
-            future_to_file = {
-                executor.submit(
-                    self.process_single_image,
-                    task[0], task[1], task[2], task[3], settings,
-                ): task
-                for task in tasks
-            }
-            
-            for future in concurrent.futures.as_completed(future_to_file):
-                task = future_to_file[future]
-                try:
-                    result = future.result()
-                except Exception as e:
-                    result = make_result(False, f"错误 {task[2]}: {str(e)}", str(e), is_single=False, is_excluded_single=False, output_count=0)
-                processed += 1
-                if result['ok']:
-                    succeeded += 1
-                    total_output_images += result.get('output_count', 1)
-                    if result.get('is_excluded_single'):
-                        excluded_single_count += 1
-                    elif not result.get('is_single'):
-                        cropped_double_count += 1
-                elif not self.cancel_event.is_set():
-                    errors.append(f"{task[1]}：{result['error'] or result['message']}")
-                self.ui_events.put((
-                    'progress',
-                    (processed / total_files) * 100,
-                    result['message'],
-                ))
+        self.ui_events.put(('phase', 'processing'))
+        stats = self._run_image_batch(tasks, settings)
+        succeeded = stats['succeeded']
+        errors = stats['errors']
+        total_output_images = stats['total_output_images']
+        excluded_single_count = stats['excluded_single_count']
+        cropped_double_count = stats['cropped_double_count']
 
         summary = {
             'settings': settings,
@@ -1132,6 +1312,7 @@ class ImageProcessorService:
             self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir, lang=lang)))
         else:
             if settings['enable_pdf']:
+                self.ui_events.put(('phase', 'pdf'))
                 self.ui_events.put(('status', get_backend_text('status_generating_summary_pdf', lang)))
                 self._generate_pdf_and_finish(settings, summary)
             else:
@@ -1242,43 +1423,13 @@ class ImageProcessorService:
             return
 
         tasks, collision_groups = self._assign_output_stems(tasks)
-        processed = 0
-        succeeded = 0
-        errors = []
-        total_output_images = 0
-        excluded_single_count = 0
-        cropped_double_count = 0
-
-        with concurrent.futures.ThreadPoolExecutor(max_workers=settings['max_threads']) as executor:
-            future_to_file = {
-                executor.submit(
-                    self.process_single_image,
-                    task[0], task[1], task[2], task[3], settings,
-                ): task
-                for task in tasks
-            }
-
-            for future in concurrent.futures.as_completed(future_to_file):
-                task = future_to_file[future]
-                try:
-                    result = future.result()
-                except Exception as e:
-                    result = make_result(False, f"错误 {task[2]}: {str(e)}", str(e), is_single=False, is_excluded_single=False, output_count=0)
-                processed += 1
-                if result['ok']:
-                    succeeded += 1
-                    total_output_images += result.get('output_count', 1)
-                    if result.get('is_excluded_single'):
-                        excluded_single_count += 1
-                    elif not result.get('is_single'):
-                        cropped_double_count += 1
-                elif not self.cancel_event.is_set():
-                    errors.append(f"{task[1]}：{result['error'] or result['message']}")
-                self.ui_events.put((
-                    'progress',
-                    (processed / total_files) * 100,
-                    result['message'],
-                ))
+        self.ui_events.put(('phase', 'processing'))
+        stats = self._run_image_batch(tasks, settings)
+        succeeded = stats['succeeded']
+        errors = stats['errors']
+        total_output_images = stats['total_output_images']
+        excluded_single_count = stats['excluded_single_count']
+        cropped_double_count = stats['cropped_double_count']
 
         if self.cancel_event.is_set():
             self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'], lang=lang)))
@@ -1330,6 +1481,7 @@ class ImageProcessorService:
             self.ui_events.put(('finish', summary_msg))
             return
 
+        self.ui_events.put(('phase', 'pdf'))
         self.ui_events.put(('status', get_backend_text('status_packing_new_pdf', lang)))
         processed_images = []
         for root, _, files in os.walk(out_dir):
@@ -1351,11 +1503,6 @@ class ImageProcessorService:
         )
 
         if self.cancel_event.is_set():
-            if final_pdf and os.path.exists(final_pdf):
-                try:
-                    os.remove(final_pdf)
-                except Exception:
-                    pass
             self.ui_events.put(('finish', self._clean_cancelled_output(settings['clean_dir'], lang=lang)))
             return
 
@@ -1365,8 +1512,21 @@ class ImageProcessorService:
 
         self.ui_events.put(('status', get_backend_text('status_cleaning_temp', lang)))
         try:
-            if os.path.isdir(raw_dir):
-                shutil.rmtree(raw_dir, ignore_errors=True)
+            if os.path.isdir(out_dir):
+                shutil.rmtree(out_dir, ignore_errors=True)
+            for fname in os.listdir(raw_dir):
+                fpath = os.path.join(raw_dir, fname)
+                if os.path.normcase(os.path.abspath(fpath)) == os.path.normcase(os.path.abspath(final_pdf)):
+                    continue
+                if fname.lower() in ['task_report.txt', 'task_log.txt']:
+                    continue
+                try:
+                    if os.path.isfile(fpath) or os.path.islink(fpath):
+                        os.remove(fpath)
+                    elif os.path.isdir(fpath):
+                        shutil.rmtree(fpath, ignore_errors=True)
+                except OSError:
+                    pass
         except Exception:
             pass
 
@@ -1385,8 +1545,7 @@ class ImageProcessorService:
             'pdf_bookmarks_imported': settings.get('pdf_bookmarks_imported'),
         }
         summary_msg = self._build_and_save_task_report(
-            summary, None,
-            save_report=False,
+            summary, raw_dir,
             pdf_path=final_pdf,
             pdf_count=1,
             keep_images=False,

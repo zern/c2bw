@@ -26,6 +26,7 @@ a = Analysis(
     datas=added_datas,
     hiddenimports=[
         'c2bw',
+        'c2bw._env',
         'c2bw.core',
         'c2bw.service',
         'c2bw.desktop',
@@ -48,7 +49,6 @@ a = Analysis(
     excludes=[
         'pkg_resources',
         'setuptools',
-        'distutils',
         'pip',
         'scipy',
         'matplotlib',

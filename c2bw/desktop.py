@@ -12,9 +12,13 @@ import re
 import socket
 import webview
 
-import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-import tkinter.font as tkfont
+try:
+    import tkinter as tk
+    from tkinter import ttk, filedialog, messagebox
+    import tkinter.font as tkfont
+except ImportError:
+    tk = None
+    ttk = filedialog = messagebox = tkfont = None
 
 from c2bw.core import (
     PDF_APPLICATION_NAME,
@@ -25,6 +29,7 @@ from c2bw.core import (
     get_system_language,
 )
 from c2bw.service import (
+    _unique_task_dir,
     APP_TITLES,
     QUIT_CONFIRMATIONS,
     get_config_dir,
@@ -550,11 +555,67 @@ def launch_web_ui():
         height=760,
         min_size=(760, 540),
         resizable=True,
-        confirm_close=True,
+        hidden=True,
+        confirm_close=False,
         background_color='#edf2f7',
         text_select=True,
     )
     service.bind_window(window)
+
+    _show_lock = threading.Lock()
+    _window_shown = False
+
+    def _reveal_window():
+        nonlocal _window_shown
+        with _show_lock:
+            if _window_shown:
+                return
+            _window_shown = True
+        try:
+            window.show()
+        except Exception:
+            pass
+
+    _fallback_show_timer = threading.Timer(3.0, _reveal_window)
+    _fallback_show_timer.daemon = True
+    _fallback_show_timer.start()
+
+    def _on_window_loaded():
+        _fallback_show_timer.cancel()
+        _reveal_window()
+
+    window.events.loaded += _on_window_loaded
+
+    def _on_window_closing():
+        with service.state_lock:
+            is_busy = service.is_processing
+            lang = service.current_language or current_lang
+        if not is_busy:
+            return True
+        if sys.platform == 'win32':
+            try:
+                import ctypes
+                title = APP_TITLES.get(lang, APP_TITLES['zh-CN'])
+                quit_confirm = QUIT_CONFIRMATIONS.get(lang, QUIT_CONFIRMATIONS['zh-CN'])
+                hwnd = 0
+                try:
+                    import webview.platforms.winforms as winforms_platform
+                    browser_form = winforms_platform.BrowserView.instances.get(window.uid)
+                    if browser_form is not None:
+                        hwnd = int(browser_form.Handle.ToInt64())
+                except Exception:
+                    pass
+                # MB_OKCANCEL (0x1) | MB_ICONQUESTION (0x20) | MB_SETFOREGROUND (0x10000)
+                res = ctypes.windll.user32.MessageBoxW(hwnd, quit_confirm, title, 0x1 | 0x20 | 0x10000)
+                if res != 1:
+                    return False
+                service.cancel_event.set()
+                service.pause_event.set()
+            except Exception:
+                pass
+        return True
+
+    window.events.closing += _on_window_closing
     window.expose(
         bridge.handle_dropped_path,
         bridge.choose_directory,
@@ -575,21 +636,25 @@ def launch_web_ui():
         bridge.set_user_language,
     )
 
-    # 设置 Windows 原生窗口与任务栏图标
+    # 设置 Windows 原生窗口与任务栏图标，并解绑高频 Move 回调避免拖拽窗口时阻塞消息循环
     if sys.platform == 'win32':
         try:
             import webview.platforms.winforms as winforms_platform
             from System.Drawing import Icon as NetIcon
             icon_file = _resource_path('hanji.ico')
-            if os.path.exists(icon_file):
-                orig_form_init = winforms_platform.BrowserView.BrowserForm.__init__
-                def _patched_form_init(self, *args, **kwargs):
-                    orig_form_init(self, *args, **kwargs)
+            orig_form_init = winforms_platform.BrowserView.BrowserForm.__init__
+            def _patched_form_init(self, *args, **kwargs):
+                orig_form_init(self, *args, **kwargs)
+                if os.path.exists(icon_file):
                     try:
                         self.Icon = NetIcon(icon_file)
                     except Exception:
                         pass
-                winforms_platform.BrowserView.BrowserForm.__init__ = _patched_form_init
+                try:
+                    self.Move -= self.on_move
+                except Exception:
+                    pass
+            winforms_platform.BrowserView.BrowserForm.__init__ = _patched_form_init
         except Exception:
             pass
 
@@ -1053,14 +1118,11 @@ class ImageProcessorApp:
         else:
             base_dir = os.path.dirname(os.path.abspath(path))
         pdf_name = os.path.splitext(os.path.basename(path))[0]
-        suffix = get_task_suffix(self.enable_crop.get(), self.enable_binarize.get(), size_opt_mode=self.size_opt_mode.get(), invert_binarize=self.invert_binarize.get())
-        if self.pdf_no_convert.get():
-            self.pdf_target_preview.set(os.path.join(base_dir, f"{pdf_name}{suffix}"))
+        suffix = get_task_suffix(self.enable_crop.get(), self.enable_binarize.get(), size_opt_mode=self.size_opt_mode.get())
+        if not suffix:
+            self.pdf_target_preview.set(os.path.join(base_dir, pdf_name))
         else:
-            candidate_pdf = os.path.join(base_dir, f"{pdf_name}{suffix}.pdf")
-            if os.path.normcase(os.path.abspath(candidate_pdf)) == os.path.normcase(os.path.abspath(path)):
-                candidate_pdf = os.path.join(base_dir, f"{pdf_name}_已去水印.pdf")
-            self.pdf_target_preview.set(candidate_pdf)
+            self.pdf_target_preview.set(os.path.join(base_dir, f"{pdf_name}{suffix}"))
 
     def select_pdf_output_dir(self):
         initial = self.pdf_output_dir.get().strip()
@@ -1090,12 +1152,12 @@ class ImageProcessorApp:
             else:
                 if not self.enable_crop.get() and not self.enable_binarize.get() and self.size_opt_mode.get() == 'original':
                     self.pdf_hint_label.config(
-                        text="提示: 仅清除水印，并直接生成新 PDF 至输出目录下",
+                        text="提示: 仅清除 PDF 中可清除的水印，并打包输出至同名目录与同名 PDF",
                         foreground="#059669"
                     )
                 else:
                     self.pdf_hint_label.config(
-                        text="提示: 提取原图并完成处理后，将直接合并生成新 PDF 至输出目录下，不创建同名文件夹",
+                        text="提示: 提取原图并完成处理后，将自动合并为新 PDF 并删除临时分页图片",
                         foreground="#0284c7"
                     )
 
@@ -1593,16 +1655,11 @@ class ImageProcessorApp:
 
             size_opt_mode = self.size_opt_mode.get()
             suffix = get_task_suffix(enable_crop, enable_binarize, size_opt_mode=size_opt_mode, invert_binarize=invert_binarize)
+            task_dir = _unique_task_dir(base_dir, f"{pdf_name}{suffix}")
             if no_convert_pdf:
-                task_dir = os.path.join(base_dir, f"{pdf_name}{suffix}")
                 final_pdf_path = ''
             else:
-                out_stem = f"{pdf_name}{suffix}"
-                candidate_pdf = os.path.abspath(os.path.join(base_dir, f"{out_stem}.pdf"))
-                if os.path.normcase(candidate_pdf) == os.path.normcase(os.path.abspath(pdf_path)):
-                    candidate_pdf = os.path.abspath(os.path.join(base_dir, f"{pdf_name}_已去水印.pdf"))
-                final_pdf_path = candidate_pdf
-                task_dir = os.path.join(base_dir, f"._c2bw_tmp_{pdf_name}{suffix}")
+                final_pdf_path = os.path.abspath(os.path.join(task_dir, f"{pdf_name}{suffix}.pdf"))
 
             try:
                 threads = self.max_threads.get()
@@ -1679,9 +1736,10 @@ class ImageProcessorApp:
                         f"将对 PDF 依次执行：\n"
                         f"1. 从 PDF 提取原始分页图片并清除水印\n"
                         f"2. 保持原始尺寸与格式输出\n"
-                        f"3. 汇总直接生成新 PDF 至输出目录下\n"
-                        f"4. 自动清理临时工作文件，不创建多余文件夹与日志\n\n"
+                        f"3. 汇总生成新 PDF\n"
+                        f"4. 自动清理临时分页图片，仅保留新 PDF\n\n"
                         f"PDF 文件：{pdf_path}\n"
+                        f"生成目录：{task_dir}\n"
                         f"输出文件：{final_pdf_path}\n\n"
                         f"是否确认开始？"
                     )
@@ -1700,9 +1758,10 @@ class ImageProcessorApp:
                     f"将对 PDF 依次执行：\n"
                     f"1. 从 PDF 提取原始分页图片并清除水印\n"
                     f"2. 按勾选任务批量处理\n"
-                    f"3. 汇总直接生成新 PDF 至输出目录下\n"
-                    f"4. 自动清理临时工作文件，不创建多余文件夹与日志\n\n"
+                    f"3. 汇总生成新 PDF\n"
+                    f"4. 自动清理临时分页图片，仅保留新 PDF\n\n"
                     f"PDF 文件：{pdf_path}\n"
+                    f"生成目录：{task_dir}\n"
                     f"输出文件：{final_pdf_path}\n\n"
                     f"是否确认开始？"
                 )
@@ -1846,6 +1905,8 @@ class ImageProcessorApp:
 
 
 def launch_tkinter_ui():
+    if tk is None:
+        raise RuntimeError("Tkinter runtime is not available in this build.")
     root = tk.Tk()
     saved_lang = get_saved_language()
     current_lang = saved_lang if saved_lang else get_system_language()
@@ -1894,4 +1955,6 @@ def main():
 
 
 if __name__ == '__main__':
+    import multiprocessing
+    multiprocessing.freeze_support()
     main()

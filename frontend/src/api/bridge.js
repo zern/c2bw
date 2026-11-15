@@ -10,35 +10,38 @@ export function initBridge() {
   }
 
   connectionPromise = new Promise((resolve) => {
+    let settled = false
+    const onReady = () => finish(true)
+    const finish = (ready) => {
+      if (settled) return
+      settled = true
+      window.removeEventListener('pywebviewready', onReady)
+      document.removeEventListener('pywebviewready', onReady)
+      isBridgeReady.value = ready
+      resolve(ready)
+    }
+
     // 1. Check if pywebview already injected
     if (window.pywebview && window.pywebview.api) {
-      isBridgeReady.value = true
-      resolve(true)
+      finish(true)
       return
     }
 
     // 2. Listen to pywebviewready
-    const onReady = () => {
-      isBridgeReady.value = true
-      resolve(true)
-    }
     window.addEventListener('pywebviewready', onReady, { once: true })
     document.addEventListener('pywebviewready', onReady, { once: true })
 
-    // 3. Fallback for browser HTTP dev server mode
+    // 3. Fallback for browser HTTP dev server mode or timeout
     setTimeout(() => {
-      if (!isBridgeReady.value) {
-        if (window.location && window.location.protocol.startsWith('http')) {
-          // In HTTP dev server mode
-          isBridgeReady.value = true
-          resolve(true)
-        } else if (window.pywebview && window.pywebview.api) {
-          isBridgeReady.value = true
-          resolve(true)
-        }
+      if (settled) return
+      if (window.pywebview && window.pywebview.api) {
+        finish(true)
+      } else if (window.location && window.location.protocol.startsWith('http')) {
+        finish(true)
+      } else {
+        finish(false)
       }
     }, 1500)
-
   })
 
   return connectionPromise

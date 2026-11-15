@@ -235,14 +235,14 @@
           </div>
 
           <div class="directory-row">
-            <label>{{ pdfForm.no_convert_pdf ? t('labelGenDir') : t('labelGenFile') }}</label>
+            <label>{{ t('labelGenDir') }}</label>
             <el-input
               :model-value="computedPdfTargetDir"
               disabled
               :placeholder="t('phGenDir')"
             />
             <el-tag size="default" type="info" style="margin-left: 10px; flex-shrink: 0;">
-              {{ pdfForm.no_convert_pdf ? (pdfForm.no_convert_pdf && !form.enable_crop && !form.enable_binarize ? t('tagSameDir') : t('tagSameDirTask')) : t('tagDirectPdf') }}
+              {{ pdfForm.no_convert_pdf && !form.enable_crop && !form.enable_binarize ? t('tagSameDir') : t('tagSameDirTask') }}
             </el-tag>
           </div>
 
@@ -725,6 +725,7 @@ const progress = ref(0)
 const status = ref(t('statusReady'))
 const workMode = ref('dir')
 let pollTimer = null
+let updateTimer = null
 let isPolling = false
 
 const pdfForm = reactive({
@@ -841,23 +842,10 @@ const computedPdfTargetDir = computed(() => {
   } else if (form.size_opt_mode === 'custom') {
     suffix = t('pdfSuffixCustom')
   }
+  const folderName = suffix ? stem + suffix : stem
   const customOut = (pdfForm.output_dir || '').trim()
   const baseDir = customOut ? customOut.replace(/[\\/]+$/, '') : defaultDir
-  const sep = (baseDir && !baseDir.endsWith('\\') && !baseDir.endsWith('/')) ? '\\' : ''
-
-  if (pdfForm.no_convert_pdf) {
-    const folderName = suffix ? stem + suffix : stem
-    return (baseDir ? baseDir + sep : '') + folderName
-  } else {
-    let outStem = suffix ? stem + suffix : stem
-    let outPdfName = outStem + '.pdf'
-    let fullOutPdf = (baseDir ? baseDir + sep : '') + outPdfName
-    if (fullOutPdf.toLowerCase() === path.toLowerCase()) {
-      outPdfName = stem + '_已去水印.pdf'
-      fullOutPdf = (baseDir ? baseDir + sep : '') + outPdfName
-    }
-    return fullOutPdf
-  }
+  return (baseDir ? baseDir + '\\' : '') + folderName
 })
 
 const phaseText = computed(() => {
@@ -1334,6 +1322,7 @@ function handleEvent(event) {
 
 async function pollEvents() {
   if (!isBridgeReady.value || isPolling) return
+  if (!processing.value && phase.value === 'idle') return
   isPolling = true
   try {
     const result = await callApi('poll_events')
@@ -1358,7 +1347,9 @@ onMounted(async () => {
   window.__onNativeDropResolved = (result) => applyDroppedResult(result)
 
   await initBridge()
-  checkForUpdates()
+  updateTimer = setTimeout(() => {
+    checkForUpdates()
+  }, 1500)
 
   // 同步用户语言设置
   try {
@@ -1376,6 +1367,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  if (updateTimer) clearTimeout(updateTimer)
   delete window.c2bwDropPath
   delete window.__onNativeDropResolved
 })

@@ -20,7 +20,12 @@ from c2bw.core import (
     apply_bookmarks_to_writer,
 )
 from c2bw.service import ImageProcessorService
-from c2bw.desktop import main
+
+
+def main():
+    """延迟导入桌面宿主：多进程工作进程会导入本包，避免其加载 pywebview/tkinter 等界面依赖。"""
+    from c2bw.desktop import main as _desktop_main
+    return _desktop_main()
 
 __all__ = [
     "__version__",
