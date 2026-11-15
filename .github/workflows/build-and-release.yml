@@ -146,7 +146,7 @@ jobs:
             runner: macos-15-intel
           - arch: arm64
             name: AppleSilicon
-            runner: macos-14
+            runner: macos-15
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
