@@ -14,7 +14,7 @@ if sys.platform == "win32":
 
 mode = sys.argv[1] if len(sys.argv) > 1 else "win11"
 
-app_version = os.environ.get("APP_VERSION", "v4.2").strip()
+app_version = os.environ.get("APP_VERSION", "v4.3").strip()
 if not app_version.startswith("v"):
     app_version = f"v{app_version}"
 

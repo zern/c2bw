@@ -14,7 +14,25 @@ export default defineConfig({
     outDir: path.resolve(__dirname, '../webui'),
     emptyOutDir: true,
     assetsDir: 'assets',
-    sourcemap: false
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('@element-plus/icons-vue')) {
+              return 'element-icons'
+            }
+            if (id.includes('element-plus')) {
+              return 'element-plus'
+            }
+            if (id.includes('vue')) {
+              return 'vue-vendor'
+            }
+            return 'vendor'
+          }
+        }
+      }
+    }
   },
   server: {
     port: 5173,

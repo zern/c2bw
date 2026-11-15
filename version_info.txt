@@ -1,10 +1,8 @@
 # UTF-8
-# 这是一个标准的 PyInstaller 版本信息配置文件
-
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(4, 2, 0, 0),
-    prodvers=(4, 2, 0, 0),
+    filevers=(4, 3, 0, 0),
+    prodvers=(4, 3, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -18,13 +16,13 @@ VSVersionInfo(
       StringTable(
         u'080404b0',
         [StringStruct(u'CompanyName', u'漢籍合璧'),
-        StringStruct(u'FileDescription', u'智能图像预处理工具 v4.2'),
-        StringStruct(u'FileVersion', u'4.2.0.0'),
+        StringStruct(u'FileDescription', u'智能图像预处理工具 v4.3'),
+        StringStruct(u'FileVersion', u'4.3.0.0'),
         StringStruct(u'InternalName', u'c2bw_processor'),
         StringStruct(u'LegalCopyright', u'By weiceng © 漢籍合璧'),
-        StringStruct(u'OriginalFilename', u'智能图像预处理工具 v4.2.exe'),
-        StringStruct(u'ProductName', u'智能图像预处理工具 v4.2'),
-        StringStruct(u'ProductVersion', u'4.2.0.0')])
+        StringStruct(u'OriginalFilename', u'智能图像预处理工具 v4.3.exe'),
+        StringStruct(u'ProductName', u'智能图像预处理工具 v4.3'),
+        StringStruct(u'ProductVersion', u'4.3.0.0')])
       ]),
     VarFileInfo([VarStruct(u'Translation', [2052, 1200])])
   ]

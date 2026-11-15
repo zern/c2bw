@@ -2,7 +2,6 @@
 """
 c2bw 桌面应用启动入口
 """
-import os
 import sys
 
 from c2bw._env import setup_bundle_environment

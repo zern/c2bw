@@ -6,9 +6,9 @@ import sys
 import re
 
 # 动态确保 version_info.txt 与当前 APP_VERSION 一致，确保 Actions 和本地打包始终包含版本元数据
-app_version = os.environ.get("APP_VERSION", "v4.2").lstrip("v")
+app_version = os.environ.get("APP_VERSION", "v4.3").lstrip("v")
 if not app_version:
-    app_version = "4.2"
+    app_version = "4.3"
 parts = [int(p) for p in re.findall(r"\d+", app_version)]
 while len(parts) < 4:
     parts.append(0)

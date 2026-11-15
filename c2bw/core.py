@@ -13,7 +13,8 @@ import tempfile
 import threading
 import locale
 import math
-from PIL import Image, JpegImagePlugin, PdfImagePlugin, Jpeg2KImagePlugin, TiffImagePlugin, ImageOps
+from typing import Any
+from PIL import Image, JpegImagePlugin, TiffImagePlugin, ImageOps
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import (
     ArrayObject, NameObject, StreamObject,
@@ -29,11 +30,12 @@ setup_bundle_environment(__file__ if '__file__' in globals() else None)
 
 # 全格式极速无损提取引擎（优先使用 PyMuPDF/pymupdf，支持 JBIG2、JPEG、TIFF、Flate 等）
 _fitz_import_error = None
+fitz: Any = None
 try:
     import pymupdf as fitz
 except Exception as _e1:
     try:
-        import fitz
+        import fitz  # type: ignore[no-redef]
     except Exception as _e2:
         fitz = None
         _fitz_import_error = f"pymupdf err: {_e1}; fitz err: {_e2}"
@@ -47,7 +49,7 @@ def _safe_asciihex_decode(data, decode_parms=None):
     if not stripped.endswith(b'>'):
         data = stripped + b'>'
     return _orig_asciihex_decode(data, decode_parms)
-pypdf.filters.ASCIIHexDecode.decode = staticmethod(_safe_asciihex_decode)
+pypdf.filters.ASCIIHexDecode.decode = staticmethod(_safe_asciihex_decode)  # type: ignore[method-assign, assignment]
 
 PDF_APPLICATION_NAME = "SHUGE.ORG"
 PDF_SPEC_VERSION = b"%PDF-1.5"
@@ -249,8 +251,22 @@ def _apply_image_rotation(data, ext, total_rot_cw, flipped_h=False):
                 return out_bio.getvalue()
 
             elif fmt in ('JPEG2000', 'JP2') or ext == '.jp2':
-                im_transformed.save(out_bio, format='JPEG2000', irreversible=False)
-                return out_bio.getvalue()
+                try:
+                    im_transformed.save(out_bio, format='JPEG2000', irreversible=False)
+                    return out_bio.getvalue()
+                except Exception:
+                    # 旧版 Pillow（如 7.2）的 JPEG2000 编码器只能写真实文件
+                    fd, tmp_path = tempfile.mkstemp(suffix='.jp2')
+                    os.close(fd)
+                    try:
+                        im_transformed.save(tmp_path, format='JPEG2000', irreversible=False)
+                        with open(tmp_path, 'rb') as tmp_file:
+                            return tmp_file.read()
+                    finally:
+                        try:
+                            os.remove(tmp_path)
+                        except OSError:
+                            pass
 
             elif fmt == 'BMP' or ext == '.bmp':
                 im_transformed.save(out_bio, format='BMP')
@@ -301,6 +317,134 @@ def _normalize_extracted_tiff(data):
     return data
 
 
+_JP2_SIGNATURE = b'\x00\x00\x00\x0cjP  \r\n\x87\n'
+_J2K_CODESTREAM_SOI_SIZ = b'\xff\x4f\xff\x51'
+
+
+def _jp2_box(box_type, payload):
+    return struct.pack('>I', 8 + len(payload)) + box_type + payload
+
+
+def _jp2_resolution_payload(dpi):
+    """把 (x, y) DPI 编码为 resc 盒子内容（单位：像素/米，VR_N/VR_D·10^VR_E）。"""
+    def _encode(value_dpi):
+        ppm = float(value_dpi) / 0.0254
+        exponent = 0
+        numerator = int(round(ppm))
+        while numerator > 0xFFFF and exponent < 10:
+            exponent += 1
+            numerator = int(round(ppm / (10 ** exponent)))
+        return max(1, numerator), 1, exponent
+
+    hr_n, hr_d, hr_e = _encode(dpi[0])
+    vr_n, vr_d, vr_e = _encode(dpi[1])
+    return struct.pack('>HHHHbb', vr_n, vr_d, hr_n, hr_d, vr_e, hr_e)
+
+
+def _wrap_j2k_codestream_as_jp2(codestream, dpi=None):
+    """
+    把裸 JPEG 2000 码流（J2K，PDF /JPXDecode 允许直接存放）封装为标准 JP2 文件。
+    码流字节原样放入 jp2c 盒子，不做任何解码重编码；仅补充 JP2 必需的头部盒子，
+    并按页面推算的解析度写入 resc 盒子，便于后续处理与重新打包时还原原始尺寸。
+    返回 None 表示无法安全封装（如分量数不是 1/3，调用方应回退）。
+    """
+    if not codestream or not codestream.startswith(_J2K_CODESTREAM_SOI_SIZ):
+        return None
+    try:
+        # SIZ 标记段：FF51 Lsiz Rsiz Xsiz Ysiz XOsiz YOsiz XTsiz YTsiz XTOsiz YTOsiz Csiz {Ssiz XRsiz YRsiz}
+        (lsiz, _rsiz, xsiz, ysiz, xosiz, yosiz,
+         _xt, _yt, _xto, _yto, csiz) = struct.unpack('>HHIIIIIIIIH', codestream[4:42])
+        if lsiz < 38 + 3 * csiz or len(codestream) < 4 + lsiz:
+            return None
+        width = xsiz - xosiz
+        height = ysiz - yosiz
+        if width <= 0 or height <= 0 or csiz not in (1, 3):
+            return None
+        ssiz = [codestream[42 + 3 * i] for i in range(csiz)]
+        # 各分量位深一致时写入统一 BPC，否则写 255 并附 bpcc 盒子
+        if len(set(ssiz)) == 1:
+            bpc = ssiz[0]
+            bpcc_box = b''
+        else:
+            bpc = 0xFF
+            bpcc_box = _jp2_box(b'bpcc', bytes(ssiz))
+        ihdr = _jp2_box(b'ihdr', struct.pack('>IIHBBBB', height, width, csiz, bpc, 7, 0, 0))
+        enum_cs = 17 if csiz == 1 else 16  # 17 = 灰度，16 = sRGB
+        colr = _jp2_box(b'colr', struct.pack('>BBBI', 1, 0, 0, enum_cs))
+        res_box = b''
+        if dpi and dpi[0] > 0 and dpi[1] > 0:
+            res_box = _jp2_box(b'res ', _jp2_box(b'resc', _jp2_resolution_payload(dpi)))
+        jp2h = _jp2_box(b'jp2h', ihdr + bpcc_box + colr + res_box)
+        ftyp = _jp2_box(b'ftyp', b'jp2 ' + struct.pack('>I', 0) + b'jp2 ')
+        return _JP2_SIGNATURE + ftyp + jp2h + _jp2_box(b'jp2c', codestream)
+    except Exception:
+        return None
+
+
+def _add_resolution_to_jp2(data, dpi):
+    """
+    JP2 文件缺少 res 解析度盒子时，在 jp2h 头盒子末尾补写 resc，其余字节（含码流）保持原样。
+    已有解析度或结构不符合预期时原样返回。
+    """
+    if not dpi or not (dpi[0] > 0 and dpi[1] > 0):
+        return data
+    try:
+        pos = 0
+        total = len(data)
+        while pos + 8 <= total:
+            length, box_type = struct.unpack('>I4s', data[pos:pos + 8])
+            if length < 8:  # 0（延伸至文件尾）或 1（64 位长度）不会出现在 jp2h 之前，保守放弃
+                return data
+            if box_type == b'jp2h':
+                body = data[pos + 8:pos + length]
+                child = 0
+                while child + 8 <= len(body):
+                    c_len, c_type = struct.unpack('>I4s', body[child:child + 8])
+                    if c_len < 8:
+                        return data
+                    if c_type == b'res ':
+                        return data
+                    child += c_len
+                res_box = _jp2_box(b'res ', _jp2_box(b'resc', _jp2_resolution_payload(dpi)))
+                new_jp2h = _jp2_box(b'jp2h', body + res_box)
+                return data[:pos] + new_jp2h + data[pos + length:]
+            if box_type == b'jp2c':
+                return data
+            pos += length
+    except Exception:
+        pass
+    return data
+
+
+def _jpx_stream_as_jp2_file(data, dpi=None):
+    """
+    PDF /JPXDecode 原始数据转为 .jp2 文件内容：
+    本身是 JP2 文件则保留原始字节（仅在缺少解析度时补写 res 盒子）；是裸码流则无损封装为 JP2。
+    """
+    if not data:
+        return None
+    if data.startswith(_JP2_SIGNATURE):
+        return _add_resolution_to_jp2(data, dpi)
+    return _wrap_j2k_codestream_as_jp2(data, dpi=dpi)
+
+
+def _page_image_dpi(page, width, height):
+    """由「图像像素尺寸 / 页面尺寸」推算原始解析度；无法可靠推算时返回 None。"""
+    try:
+        rect = page.rect
+        if width > 0 and height > 0 and rect.width > 0 and rect.height > 0:
+            dpi_x = width * 72.0 / rect.width
+            dpi_y = height * 72.0 / rect.height
+            if page.rotation in (90, 270):
+                dpi_x = width * 72.0 / rect.height
+                dpi_y = height * 72.0 / rect.width
+            if 20.0 <= dpi_x <= 4800.0 and 20.0 <= dpi_y <= 4800.0:
+                return (round(dpi_x, 2), round(dpi_y, 2))
+    except Exception:
+        pass
+    return None
+
+
 def _wrap_g4_stream_as_tiff(ccitt_data, width, height, photometric=1, dpi=None):
     """
     把 CCITT Group 4 (T.6) 原生压缩数据装进最小化单 Strip TIFF 容器（PIL / libtiff 可直接解码）。
@@ -340,7 +484,7 @@ def _wrap_g4_stream_as_tiff(ccitt_data, width, height, photometric=1, dpi=None):
     out = bytearray(b'II')
     out += struct.pack('<HI', 42, 8)
     out += struct.pack('<H', len(entries))
-    for index, (tag, typ, count, value) in enumerate(entries):
+    for _index, (tag, typ, count, value) in enumerate(entries):
         if tag == 273:
             value = data_offset
         elif tag == 282:
@@ -1186,6 +1330,7 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
             try:
                 data = None
                 ext = None
+                jp_dpi = None
 
                 if not deep_analysis:
                     # 极速无损路径：页面无旋转时，CCITT G4 二值图直接复用原生压缩流封装为 TIFF，
@@ -1244,6 +1389,16 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                     elif raw_ext == "bmp":
                         ext = ".bmp"
                         data = img_info.get("image")
+                    elif raw_ext in ("jpx", "jp2", "j2k", "jpf", "jpm"):
+                        # JPEG 2000（/JPXDecode）：保持原始压缩数据输出为 .jp2，不再转码为 PNG。
+                        # 原始数据若是裸码流，则无损封装为标准 JP2 容器并写入页面解析度。
+                        jp_size = next(
+                            ((it[2], it[3]) for it in img_list if it[0] == bottom_xref and len(it) > 3),
+                            (0, 0),
+                        )
+                        jp_dpi = _page_image_dpi(page, int(jp_size[0] or 0), int(jp_size[1] or 0))
+                        data = _jpx_stream_as_jp2_file(img_info.get("image"), dpi=jp_dpi)
+                        ext = ".jp2" if data else None
 
                     # 极速轻量合法性校验：仅当缺少有效数据或头部异常时才触发 Pixmap 渲染解码
                     need_pixmap = not (data and ext)
@@ -1280,6 +1435,10 @@ def _extract_images_with_fitz(pdf_path, extract_dir, progress_callback=None, can
                 page_rot = page.rotation
                 if page_rot != 0 and data:
                     data = _apply_image_rotation(data, ext, page_rot, False)
+                    if ext == '.jp2' and jp_dpi:
+                        # 旋转需重新编码 JP2，会丢失解析度盒子：按旋转后的方向补写
+                        rot_dpi = (jp_dpi[1], jp_dpi[0]) if page_rot in (90, 270) else jp_dpi
+                        data = _add_resolution_to_jp2(data, rot_dpi)
 
                 filename = f"page_{page_num:04d}{ext}"
                 save_path = os.path.join(extract_dir, filename)
@@ -1381,6 +1540,9 @@ def _extract_images_with_pypdf(pdf_path, extract_dir, progress_callback=None, ca
 
         if ext == '.tif' and data:
             data = _normalize_extracted_tiff(data)
+        elif ext == '.jp2' and data:
+            # 裸 JPEG 2000 码流无损封装为标准 JP2 容器，与 PyMuPDF 引擎输出保持一致
+            data = _jpx_stream_as_jp2_file(data) or data
 
         # 计算并应用旋转和镜像
         page_rot = _get_page_rotation(page)
@@ -2165,22 +2327,40 @@ def get_jp2_save_options(source_img, src_path):
         return {}
 
 
+_FILE_ONLY_ENCODER_FORMATS = {'JPEG2000'}
+
+
 def save_image_atomically(pil_img, output_path, image_format, write_lock=None, **save_options):
     """
     写入同目录临时文件，成功后再替换，避免异常时出现残缺图片。
 
     编码（G4/JPEG/JP2 压缩，CPU 密集）先在锁外写入内存缓冲区，可由多个线程并行；
     write_lock 只保护落盘与替换这一小段 IO，避免把整个编码过程串行化。
+    旧版 Pillow（如 Win7 版使用的 7.2）的 JPEG2000 编码器只能写入真实文件，
+    此时在锁外直接编码到临时文件，锁内只做替换。
     """
-    buffer = io.BytesIO()
-    pil_img.save(buffer, format=image_format, **save_options)
-    data = buffer.getbuffer()
-
     temporary_path = f"{output_path}.{os.getpid()}-{threading.get_ident()}.part"
+    data = None
+    if image_format.upper() in _FILE_ONLY_ENCODER_FORMATS:
+        try:
+            pil_img.save(temporary_path, format=image_format, **save_options)
+        except BaseException:
+            if os.path.exists(temporary_path):
+                try:
+                    os.remove(temporary_path)
+                except OSError:
+                    pass
+            raise
+    else:
+        buffer = io.BytesIO()
+        pil_img.save(buffer, format=image_format, **save_options)
+        data = buffer.getbuffer()
+
     def _do_save():
         try:
-            with open(temporary_path, 'wb') as fp:
-                fp.write(data)
+            if data is not None:
+                with open(temporary_path, 'wb') as fp:
+                    fp.write(data)
             os.replace(temporary_path, output_path)
         finally:
             if os.path.exists(temporary_path):

@@ -38,10 +38,10 @@ from c2bw.core import (
 
 
 APP_TITLES = {
-    'zh-CN': '智能图像预处理工具 v4.2',
-    'zh-TW': '智能圖像預處理工具 v4.2',
-    'ja': 'スマート画像前処理ツール v4.2',
-    'en': 'Smart Image Preprocessor v4.2',
+    'zh-CN': '智能图像预处理工具 v4.3',
+    'zh-TW': '智能圖像預處理工具 v4.3',
+    'ja': 'スマート画像前処理ツール v4.3',
+    'en': 'Smart Image Preprocessor v4.3',
 }
 
 QUIT_CONFIRMATIONS = {
@@ -52,8 +52,8 @@ QUIT_CONFIRMATIONS = {
 }
 
 UPDATE_INFO_URL = 'https://tools.hanjihebi.com/aisoft/c2bw_update.json'
-CURRENT_VERSION = '4.2.0.0'
-CURRENT_VERSION_NAME = '4.2'
+CURRENT_VERSION = '4.3.0.0'
+CURRENT_VERSION_NAME = '4.3'
 
 # 图像批处理进度事件的最小上报间隔（秒）。界面按 50~250ms 轮询，
 # 逐张上报在高速批量处理时只会堆积事件并拖慢收尾，故此处限流。
@@ -916,7 +916,11 @@ class ImageProcessorService:
             for task in reversed(requeue):
                 pending.appendleft(task)
             in_flight.clear()
-            executor.shutdown(wait=False)
+            try:
+                executor.shutdown(wait=False)
+            except OSError:
+                # Python 3.8 关闭已损坏的进程池时可能因句柄已关闭而抛出 WinError 6，可忽略
+                pass
             workers = max(1, int(settings.get('max_threads', 8)))
             executor = concurrent.futures.ThreadPoolExecutor(max_workers=workers)
             worker = self.process_single_image
@@ -1076,7 +1080,7 @@ class ImageProcessorService:
                         except OSError:
                             pass
             # 自底向上清理 target_dir 内空出来的子文件夹
-            for root, dirs, files in os.walk(target_dir, topdown=False):
+            for root, _dirs, _files in os.walk(target_dir, topdown=False):
                 if os.path.normcase(os.path.abspath(root)) != os.path.normcase(os.path.abspath(target_dir)):
                     try:
                         if not os.listdir(root):
@@ -1185,7 +1189,7 @@ class ImageProcessorService:
         self.ui_events.put(('phase', 'pdf'))
         self.ui_events.put(('status', get_backend_text('status_direct_pdf', lang)))
 
-        for dir_path, image_paths, pdf_path in group_targets:
+        for _dir_path, image_paths, pdf_path in group_targets:
             if self.cancel_event.is_set():
                 self.ui_events.put(('finish', self._clean_cancelled_output(tgt_dir, lang=lang)))
                 return

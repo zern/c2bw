@@ -15,7 +15,7 @@ def setup_bundle_environment(caller_file=None):
 
     # 1. PyInstaller 模式
     if hasattr(sys, '_MEIPASS'):
-        bundle_dirs.append(getattr(sys, '_MEIPASS'))
+        bundle_dirs.append(sys._MEIPASS)
 
     # 2. Nuitka __compiled__ 结构体模式
     compiled_info = getattr(sys.modules.get('__main__'), '__compiled__', None) or globals().get('__compiled__')

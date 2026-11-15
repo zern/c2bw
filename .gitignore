@@ -12,3 +12,8 @@ frontend/node_modules/
 *.build/
 *.dist/
 *.pdf
+nuitka-crash-report.xml
+test_output_exe/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

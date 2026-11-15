@@ -8,21 +8,23 @@ import sys
 import tempfile
 import threading
 import queue
-import re
 import socket
+from typing import Any, ClassVar, Dict, Tuple
 import webview
 
+tk: Any = None
+ttk: Any = None
+filedialog: Any = None
+messagebox: Any = None
+tkfont: Any = None
 try:
     import tkinter as tk
     from tkinter import ttk, filedialog, messagebox
     import tkinter.font as tkfont
 except ImportError:
-    tk = None
-    ttk = filedialog = messagebox = tkfont = None
+    pass
 
 from c2bw.core import (
-    PDF_APPLICATION_NAME,
-    PDF_SPEC_VERSION,
     extract_images_from_pdf,
     get_task_suffix,
     get_backend_text,
@@ -89,12 +91,12 @@ def _resolve_from_everything_windows(name):
                 extracted_texts.append(title_buf.value)
 
             child_windows = []
-            def child_cb(ch, _):
+            def child_cb(ch, _, _targets=child_windows):
                 cls = ctypes.create_unicode_buffer(256)
                 user32.GetClassNameW(ch, cls, 256)
                 cls_lower = cls.value.lower()
                 if cls_lower in ('msctls_statusbar32', 'edit', 'combobox'):
-                    child_windows.append((ch, cls_lower))
+                    _targets.append((ch, cls_lower))
                 return True
 
             user32.EnumChildWindows(h, WNDENUMPROC(child_cb), 0)
@@ -684,7 +686,7 @@ class ImageProcessorApp:
 
     def __init__(self, root):
         self.root = root
-        self.root.title("智能图像预处理工具 v4.2")
+        self.root.title("智能图像预处理工具 v4.3")
         # 在较矮的屏幕上留出系统任务栏空间，其他内容通过滚动条访问。
         window_height = min(820, max(480, self.root.winfo_screenheight() - 100))
         self.root.geometry(f"700x{window_height}")
@@ -1302,7 +1304,7 @@ class ImageProcessorApp:
 
         self._update_pdf_hint()
 
-    WOLF_PRESET_MAP = {
+    WOLF_PRESET_MAP: ClassVar[Dict[int, Tuple[str, int, float]]] = {
         0: ("clean", 41, 0.22),
         1: ("standard", 51, 0.30),
         2: ("faint_ink", 61, 0.38),
@@ -1440,7 +1442,6 @@ class ImageProcessorApp:
 
         if split_pct >= 50:
             overlap_pct = 2 * split_pct - 100
-            exclusive_pct = 100 - split_pct
 
             cut1_x = sx1 + int(spread_w * (100 - split_pct) / 100.0)
             cut2_x = sx1 + int(spread_w * split_pct / 100.0)
@@ -1918,7 +1919,7 @@ def launch_tkinter_ui():
             root.iconbitmap(icon_file)
         except Exception:
             pass
-    app = ImageProcessorApp(root)
+    ImageProcessorApp(root)
     root.mainloop()
 
 

@@ -2,7 +2,6 @@
 import io
 import os
 import tempfile
-import threading
 import unittest
 from unittest.mock import patch
 

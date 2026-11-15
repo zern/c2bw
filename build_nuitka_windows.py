@@ -85,9 +85,9 @@ def build_nuitka():
     if os.path.exists(pynet_runtime_dll):
         shutil.copy2(pynet_runtime_dll, "Python.Runtime.dll")
 
-    app_version = os.environ.get("APP_VERSION", "v4.2").lstrip("v")
+    app_version = os.environ.get("APP_VERSION", "v4.3").lstrip("v")
     if not app_version:
-        app_version = "4.2"
+        app_version = "4.3"
 
     import re
     parts = [int(p) for p in re.findall(r"\d+", app_version)]
@@ -172,7 +172,7 @@ def build_nuitka():
     ]
 
     try:
-        ret = subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)
     finally:
         if os.path.exists("Python.Runtime.dll"):
             try:

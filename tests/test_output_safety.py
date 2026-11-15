@@ -9,7 +9,6 @@ from unittest.mock import patch
 
 from PIL import Image, TiffImagePlugin
 
-import c2bw.core as core
 from c2bw.core import clean_cancelled_output, save_image_atomically
 from c2bw.service import ImageProcessorService, _unique_task_dir
 
@@ -124,7 +123,7 @@ class TestWriteLockScope(unittest.TestCase):
 
     def test_formats_roundtrip_through_buffer(self):
         with tempfile.TemporaryDirectory() as d:
-            rgb = Image.new("RGB", (40, 30), (200, 100, 50))
+            rgb = Image.new("RGB", (128, 96), (200, 100, 50))
             for name, fmt, opts in (
                 ("a.jpg", "JPEG", {"quality": 80, "progressive": True, "optimize": True, "dpi": (300, 300)}),
                 ("a.jp2", "JPEG2000", {}),
@@ -133,7 +132,7 @@ class TestWriteLockScope(unittest.TestCase):
                 out = os.path.join(d, name)
                 save_image_atomically(rgb, out, fmt, write_lock=threading.Lock(), **opts)
                 with Image.open(out) as reread:
-                    self.assertEqual(reread.size, (40, 30))
+                    self.assertEqual(reread.size, (128, 96))
 
 
 if __name__ == "__main__":
